@@ -1,0 +1,5 @@
+# Exact runtime dependency; wheel digest verified against the official PyPI release.
+# https://pypi.org/pypi/xlrd/2.0.1/json
+# XLSX is parsed with bounded standard-library ZIP/XML readers.
+xlrd==2.0.1 \
+    --hash=sha256:6a33ee89877bd9abc1158129f6e94be74e2679636b8a205b43b85206c3f0bbdd
