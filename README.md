@@ -1,4 +1,15 @@
-# ETF quantity collector: manual preparation package
+# Scheduled ETF quantity alerts
+
+The daily workflow is registered for Korean weekdays at 08:30 (UTC Sunday–Thursday 23:30). It uses the existing verified private Telegram destination only when a newly verified disclosure changes exact stock quantities. The first accepted disclosure establishes a baseline without an alert. GitHub scheduling can be delayed.
+
+See [daily operations](docs/daily-alerts.md) for durable repository history, current/historical CU gates, correction holds, CAS-before-send and uncertain-delivery quarantine. Manual execution of the daily workflow is always read-only and sends nothing. Initial scheduled execution and hosted history writes still require operational verification. No separate notification schedule is created.
+
+The user approved the daily job contents:write permission to preserve public issuer originals and notification state under runtime/. Bot token and chat ID remain existing GitHub Secrets. The existing web dashboard is unchanged and is not automatically synchronized to this history.
+
+---
+
+## Original manual preparation package
+
 
 This is a read-only, manually triggered GitHub Actions dry run for TIME 미국나스닥100액티브 (426030) and KOACT 미국나스닥성장기업액티브 (0015B0). It includes 12 archived official Excel disclosures and their existing snapshot records, with dates from 2026-09-28 through 2026-10-08.
 

@@ -1,0 +1,41 @@
+name: Daily ETF quantity alerts
+on:
+  schedule:
+    - cron: '30 23 * * 0-4'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: etf-daily-history-and-alerts
+  cancel-in-progress: false
+jobs:
+  daily:
+    if: github.ref == 'refs/heads/main' && github.event.repository.private == true && github.repository == 'Sin-Yejun/etf-tracker'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version-file: .python-version
+      - name: Install locked parser
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
+      - name: Regression tests without secrets or network
+        run: |
+          python -m unittest discover -s tests -v
+          python -m unittest test_daily_engine test_daily_runner test_github_history test_cu_validation test_delivery_state test_telegram_verify test_telegram_test_send -v
+      - name: Manual validation without writes or Telegram
+        if: github.event_name == 'workflow_dispatch'
+        run: python daily_runner.py
+      - name: Approved scheduled collection and changed-quantity notifications
+        if: github.event_name == 'schedule'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python daily_runner.py
