@@ -38,4 +38,44 @@ class VerificationTests(unittest.TestCase):
         with patch('telegram_verify.http.client.HTTPSConnection',side_effect=RuntimeError('https://api.telegram.org/bot'+TOKEN)):
             with self.assertRaises(VerificationError) as error:api(TOKEN,'getMe',{})
             self.assertNotIn(TOKEN,str(error.exception));self.assertNotIn('https:',str(error.exception))
+    def test_late_arrival_bounded_poll_no_consumption(self):
+        calls=[]; sleeps=[]; diagnostics=[]
+        polls=0
+        def call(token,method,body):
+            nonlocal polls
+            calls.append((method,body))
+            if method=='getMe':return {'is_bot':True,'username':'daniel45_etf_bot'}
+            if method=='getWebhookInfo':return {'url':''}
+            polls+=1
+            return [] if polls==1 else [message()]
+        self.assertEqual(verify(TOKEN,PHRASE,call,NOW,attempts=7,sleep=sleeps.append,diagnostic=diagnostics.append),123)
+        self.assertEqual(sleeps,[8])
+        self.assertEqual([body for method,body in calls if method=='getUpdates'],[{'limit':100,'timeout':0}]*2)
+        output=' '.join(diagnostics)
+        for private in (TOKEN,PHRASE,'123'):
+            self.assertNotIn(private,output)
+    def test_empty_queue_stops_at_attempt_bound(self):
+        call,calls=caller([]); sleeps=[]
+        with self.assertRaisesRegex(VerificationError,'EMPTY_QUEUE'):
+            verify(TOKEN,PHRASE,call,NOW,attempts=7,sleep=sleeps.append)
+        self.assertEqual(sum(method=='getUpdates' for method,body in calls),7)
+        self.assertEqual(sleeps,[8]*6)
+    def test_specific_reason_without_raw_content(self):
+        for updates,reason in [([{'edited_message':message()['message']}],'EDITED_ONLY'),([message(date=NOW-901)],'OUTSIDE_TIME_WINDOW'),([message(1),message(2)],'AMBIGUOUS'),([message(text='unrelated private content')],'NO_EXACT_TEXT')]:
+            call,_=caller(updates)
+            with self.assertRaisesRegex(VerificationError,reason) as error:
+                verify(TOKEN,PHRASE,call,NOW)
+            self.assertNotIn('unrelated private content',str(error.exception))
+    def test_webhook_appears_between_polls_stops(self):
+        number=0; polls=0
+        def call(token,method,body):
+            nonlocal number,polls
+            if method=='getMe':return {'is_bot':True,'username':'daniel45_etf_bot'}
+            if method=='getWebhookInfo':
+                number+=1
+                return {'url':'' if number==1 else 'https://existing.invalid'}
+            polls+=1;return []
+        with self.assertRaisesRegex(VerificationError,'existing webhook'):
+            verify(TOKEN,PHRASE,call,NOW,attempts=7,sleep=lambda _:None)
+        self.assertEqual(polls,1)
 if __name__=='__main__': unittest.main()
