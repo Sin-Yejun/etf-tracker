@@ -32,7 +32,7 @@ class RunnerTests(unittest.TestCase):
    return raw,{'httpStatus':200,'responseUrl':source['sourceUrl'],'contentDisposition':''}
   body=json.dumps({'info':{'product':{'fId':'2ETFQ1','stkTicker':'0015B0','fNm':'KoAct 미국나스닥성장기업액티브','qPerCu':'50000'}}}).encode()
   result,*_=latest_collection('koact',dt.date(2026,10,9),fetch,lambda f:body)
-  self.assertEqual(result['asOf'],'2026-10-08');self.assertEqual(result['requestedDate'],'2026-10-08')
+  self.assertEqual(result['asOf'],'2026-10-08');self.assertEqual(result['requestedDate'],'2026-10-08');self.assertEqual(result['cuDiagnostic'],'historical_cu_evidence_missing')
  def test_no_data_is_error_not_unchanged(self):
   result,*_=latest_collection('koact',dt.date(2026,10,9),lambda *a:(b'',{'httpStatus':522}),lambda f:b'')
   self.assertEqual(result['status'],'source_error');self.assertIsNone(result['asOf'])
@@ -69,5 +69,5 @@ class RunnerTests(unittest.TestCase):
   raw=(ROOT/'fixtures/originals/koact-2026-10-08.xls').read_bytes()
   def cu_fetch(f):raise TimeoutError()
   result,body,cu,evidence,attempts=latest_collection('koact',dt.date(2026,10,8),lambda *a:(raw,{'httpStatus':200,'contentDisposition':''}),cu_fetch)
-  self.assertIsNone(cu);self.assertIsNone(evidence);self.assertEqual(result['asOf'],'2026-10-08')
+  self.assertIsNone(cu);self.assertIsNone(evidence);self.assertEqual(result['asOf'],'2026-10-08');self.assertEqual(result['cuDiagnostic'],'cu_fetch_failed')
 if __name__=='__main__':unittest.main()
