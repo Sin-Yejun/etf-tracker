@@ -36,17 +36,22 @@ def latest_collection(fund,today,fetch=download,cu_fetch=fetch_evidence,historic
             attempts.append({'date':date,'status':'download_or_validation_error'});continue
         attempts.append({'date':date,'status':'verified_source','sha256':digest})
         evidence=None
+        cu_stage='cu_fetch_failed'
         try:
             evidence=cu_fetch(fund)
+            cu_stage='cu_identity_schema_or_value_unverified'
+            current_cu=parse_cu(fund,evidence)
+            cu_stage='historical_cu_evidence_missing' if date!=today.isoformat() else 'cu_date_proof_unverified'
             try:profile=current_profile(fund,date,evidence)
             except CUError:
-                current_cu=parse_cu(fund,evidence)
                 previous=(historical_profiles or {}).get(date)
                 if not isinstance(previous,dict) or str(previous.get('cu'))!=str(current_cu):raise
                 profile=deepcopy(previous)
             collection['cu']=profile['cu']
+            collection['cuDiagnostic']='fresh_date_profile' if date==today.isoformat() else 'stored_historical_profile'
         except Exception:
             profile=None
+            collection['cuDiagnostic']=cu_stage
             if date!=today.isoformat():
                 collection['status']='cu_unverified_historical';collection['errors']=['Historical CU evidence unavailable; not inferred from current undated page']
         return collection,raw,profile,evidence,attempts
@@ -119,8 +124,9 @@ def run(dry_run=True):
                     profile['evidence']['originalKey']=key
         state,outcome=ingest_collection(state,collection,cid,profile,now=int(time.time()))
         if store:store.save(state)
-        report['results'].append({'fund':fund,'outcome':outcome,'attempts':attempts,'cuVerified':profile is not None})
+        report['results'].append({'fund':fund,'outcome':outcome,'attempts':attempts,'cuVerified':profile is not None,'cuDiagnostic':collection.get('cuDiagnostic','not_checked'),'sourceStatus':collection['status']})
         print(f"{fund}: {outcome['status']} · source {outcome.get('asOf') or 'unverified'}")
+        print(json.dumps({'fund':fund,'sourceStatus':collection['status'],'cuDiagnostic':collection.get('cuDiagnostic','not_checked'),'reason':outcome.get('reason'),'attempts':[{k:a[k] for k in ('date','status','httpStatus') if k in a} for a in attempts]},ensure_ascii=False,sort_keys=True))
     report['acceptedMessages']=0
     if not dry_run:
         # No fresh changed disclosure this run: do not send old queued data on
