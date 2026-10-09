@@ -1,7 +1,7 @@
 name: Daily ETF quantity alerts
 on:
   schedule:
-    - cron: '30 23 * * 0-4'
+    - cron: '30 23 * * SUN-THU'
   workflow_dispatch:
 permissions:
   contents: read
