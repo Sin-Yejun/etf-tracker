@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ETF 수량 기록</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;600&display=swap">
+<style>
+  :root { color-scheme: light dark; --bg: #fff; --ink: #1d2329; --muted: #6b7480; --line: #e3e6ea; --soft: #f4f5f7; --up: #d1343b; --down: #2563c9; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #171a1e; --ink: #e6e8eb; --muted: #949ca6; --line: #2c3138; --soft: #22262c; --up: #f0636a; --down: #6b9bef; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 "IBM Plex Sans KR", "Malgun Gothic", sans-serif; }
+  main { max-width: 880px; margin: 0 auto; padding: 28px 16px 72px; }
+  button, select { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--down); outline-offset: 2px; }
+
+  /* Fund switch */
+  .funds { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; padding: 3px; gap: 3px; }
+  .funds button { border: 0; background: none; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-weight: 600; }
+  .funds button small { font-weight: 400; color: var(--muted); margin-left: 6px; }
+  .funds button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+  .funds button[aria-pressed="true"] small { color: inherit; opacity: .7; }
+  h1 { font-size: 22px; font-weight: 600; margin: 18px 0 4px; }
+  .cu { color: var(--muted); margin: 0 0 20px; }
+
+  /* Disclosure timeline: one button per date, labelled by what changed that day */
+  .days { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; scrollbar-width: thin; }
+  .days button { flex: none; text-align: left; border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 8px 12px; cursor: pointer; min-width: 92px; }
+  .days button:hover { border-color: var(--muted); }
+  .days b { display: block; font-weight: 600; }
+  .days span { font-size: 12px; color: var(--muted); }
+  .days .changed span { color: var(--up); }
+  .days button[aria-pressed="true"] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+
+  .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; justify-content: space-between; margin: 20px 0 8px; }
+  #summary { margin: 0; }
+  .bar label { color: var(--muted); font-size: 13px; }
+  .bar select { margin-left: 6px; border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; background: var(--bg); }
+  .view { display: inline-flex; gap: 14px; font-size: 14px; }
+  .view button { border: 0; background: none; padding: 2px 0; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; }
+  .view button[aria-pressed="true"] { color: var(--ink); border-color: var(--ink); }
+  .units { margin-bottom: 10px; }
+
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th { font-weight: 400; color: var(--muted); font-size: 12px; text-align: right; padding: 8px; border-bottom: 1px solid var(--line); }
+  td { text-align: right; padding: 10px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; padding-left: 0; }
+  td:last-child, th:last-child { padding-right: 0; }
+  .stock { display: flex; align-items: center; gap: 12px; white-space: normal; }
+  .logo { width: 30px; height: 30px; flex: none; border-radius: 6px; object-fit: contain; background: #fff; border: 1px solid var(--line); color: var(--muted); font-size: 11px; display: grid; place-items: center; }
+  span.logo { background: var(--soft); }
+  img.logo.light { background: #2b3138; }
+  .stock { word-break: keep-all; overflow-wrap: anywhere; }
+  .name { color: var(--muted); font-size: 12px; }
+  .mark { font-size: 12px; margin-left: 6px; }
+  .up { color: var(--up); } .down { color: var(--down); }
+  .themes { margin: 24px 0 8px; }
+  .themes { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 10px 0; }
+  .themes summary { font-weight: 600; cursor: pointer; }
+  .themes[open] summary { margin-bottom: 8px; }
+  [hidden] { display: none !important; }
+  .theme { display: grid; grid-template-columns: 9em 1fr 4.5em 5em; align-items: center; gap: 12px; padding: 5px 0; font-variant-numeric: tabular-nums; }
+  .theme .track { height: 8px; background: var(--soft); border-radius: 4px; overflow: hidden; }
+  .theme .fill { height: 100%; background: var(--ink); opacity: .75; }
+  .theme .w, .theme .d { text-align: right; }
+  .theme .d { font-size: 13px; color: var(--muted); }
+  .note { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
+  .sub { color: var(--muted); font-size: 12px; font-weight: 400; margin-left: 6px; }
+  #rows .group th { text-align: left; padding: 20px 0 6px; font-size: 13px; font-weight: 600; color: var(--ink); }
+  #rows .empty { color: var(--muted); padding: 32px 0; text-align: center; }
+  @media (max-width: 600px) { .weight, .before { display: none; } h1 { font-size: 19px; } .theme { grid-template-columns: 8em 1fr 4em 4.5em; gap: 8px; font-size: 13px; } }
+</style>
+<main>
+  <div class="funds" role="group" aria-label="ETF 선택">
+    <button data-fund="time">TIME<small>426030</small></button>
+    <button data-fund="koact">KOACT<small>0015B0</small></button>
+  </div>
+  <h1 id="title"></h1>
+  <p class="cu" id="cu"></p>
+
+  <div class="view units" role="group" aria-label="기간 단위">
+    <button data-unit="day">일별</button><button data-unit="week">주별</button><button data-unit="month">월별</button>
+  </div>
+  <nav class="days" id="days" aria-label="공시일"></nav>
+
+  <div class="bar">
+    <p id="summary"></p>
+    <label>비교 대상<select id="before"></select></label>
+  </div>
+  <details class="themes">
+    <summary>테마별 비중</summary>
+    <div id="themes"></div>
+    <p class="note">주식 평가액 기준이라 수량이 그대로여도 주가가 움직이면 비중이 바뀝니다.</p>
+  </details>
+
+  <div class="bar">
+    <div class="view" id="show" role="group" aria-label="보기">
+      <button data-mode="change"></button>
+      <button data-mode="holdings"></button>
+    </div>
+    <div class="view" id="sort" role="group" aria-label="정렬">
+      <button data-sort="weight">비중순</button>
+      <button data-sort="rate">변화율순</button>
+    </div>
+  </div>
+
+  <table>
+    <thead><tr id="head"></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</main>
+<script>
+const FUNDS = {
+  time: { name: 'TIME 미국나스닥100액티브', cu: '20,000' },
+  koact: { name: 'KOACT 미국나스닥성장기업액티브', cu: '50,000' },
+};
+// shortcut: free FMP logo CDN by US ticker; swap for local images if it goes away.
+const LOGO = t => `https://financialmodelingprep.com/image-stock/${t}.png`;
+// Some logos are white-on-transparent and vanish on the white tile; give those a dark tile.
+function tone(img) {
+  const c = document.createElement('canvas'); c.width = c.height = 16;
+  const g = c.getContext('2d'); g.drawImage(img, 0, 0, 16, 16);
+  let sum = 0, n = 0;
+  try {
+    const px = g.getImageData(0, 0, 16, 16).data;
+    for (let k = 0; k < px.length; k += 4) if (px[k + 3] > 128) { sum += px[k] + px[k + 1] + px[k + 2]; n++; }
+  } catch { return; }
+  if (n && sum / n / 3 > 225) img.classList.add('light');
+}
+const snaps = { time: {}, koact: {} };
+let META = { themes: [], stocks: {} };
+const UNSORTED = '미분류';
+// New holdings missing from stocks.json fall back to the issuer's English name and 미분류.
+const info = r => { const t = r.code.split(' ')[0].toUpperCase(); return { ticker: t, ko: META.stocks[t]?.ko || r.name, theme: META.stocks[t]?.theme || UNSORTED }; };
+const view = { fund: 'time', unit: 'day', after: null, before: null, mode: 'change', sort: 'weight' };
+const $ = id => document.getElementById(id);
+
+// Exact decimal b - a on strings via BigInt, so 303.06 → 290.59 is exactly -12.47.
+function sub(a, b) {
+  const scale = Math.max(...[a, b].map(x => (x.split('.')[1] || '').length));
+  const big = x => { const [i, f = ''] = x.split('.'); return BigInt(i + f.padEnd(scale, '0')); };
+  const d = big(b) - big(a);
+  let t = (d < 0n ? -d : d).toString().padStart(scale + 1, '0');
+  if (scale) t = (t.slice(0, -scale) + '.' + t.slice(-scale)).replace(/0+$/, '').replace(/\.$/, '');
+  return (d < 0n ? '-' : '') + t;
+}
+console.assert(sub('303.06', '290.59') === '-12.47' && sub('0', '63') === '63' && sub('1.5', '1.50') === '0', 'sub');
+
+const isZero = q => /^-?0*(\.0*)?$/.test(q);
+const fmt = q => q.replace(/^(-?\d+)/, m => Number(m).toLocaleString('ko-KR'));
+const stocks = rows => new Map(rows.filter(r => r.kind === 'stock').map(r => [r.id, r]));
+const total = m => [...m.values()].reduce((s, r) => s + Number(r.valueKrw), 0);
+const dateList = fund => Object.keys(snaps[fund]).sort();
+const shortDate = d => `${+d.slice(5, 7)}월 ${+d.slice(8)}일`;
+const weekday = d => '일월화수목금토'[new Date(d + 'T00:00:00').getDay()];
+
+function compare(fund, before, after) {
+  const a = stocks(snaps[fund][before] || []), b = stocks(snaps[fund][after] || []);
+  const ta = total(a), tb = total(b);
+  const items = [...new Set([...a.keys(), ...b.keys()])].map(id => {
+    const ra = a.get(id), rb = b.get(id), qa = ra?.quantity ?? '0', qb = rb?.quantity ?? '0';
+    const diff = sub(qa, qb);
+    const status = isZero(qa) && !isZero(qb) ? '신규' : !isZero(qa) && isZero(qb) ? '편출' : isZero(diff) ? '' : '변경';
+    const wa = ra ? Number(ra.valueKrw) / ta : 0, wb = rb ? Number(rb.valueKrw) / tb : 0;
+    // Change relative to the earlier quantity; a new position counts as infinitely large.
+    const rate = isZero(qa) ? (isZero(qb) ? 0 : Infinity) : Number(diff) / Number(qa);
+    return { r: rb || ra, ...info(rb || ra), qa, qb, diff, rate, status, wa, wb, weight: rb ? wb : wa };
+  });
+  items.sort((x, y) => y.weight - x.weight);
+  return { items, held: b.size };
+}
+
+const iso = dt => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+function monday(d) {
+  const dt = new Date(d + 'T00:00:00');
+  dt.setDate(dt.getDate() - (dt.getDay() + 6) % 7);
+  return iso(dt);
+}
+function periodLabel(unit, key) {
+  if (unit === 'day') return `${shortDate(key)} (${weekday(key)})`;
+  if (unit === 'month') return `${key.slice(0, 4)}년 ${+key.slice(5)}월`;
+  const fri = new Date(key + 'T00:00:00'); fri.setDate(fri.getDate() + 4);
+  const end = iso(fri);
+  return `${shortDate(key)}–${end.slice(5, 7) === key.slice(5, 7) ? +end.slice(8) + '일' : shortDate(end)}`;
+}
+// Each period is represented by its last disclosure and compared with the previous period's last one
+// (or, for the very first period, with its own first disclosure).
+function periods(fund) {
+  const keyOf = { day: d => d, week: monday, month: d => d.slice(0, 7) }[view.unit];
+  const groups = new Map();
+  for (const d of dateList(fund)) groups.set(keyOf(d), { key: keyOf(d), first: groups.get(keyOf(d))?.first || d, end: d });
+  const list = [...groups.values()];
+  list.forEach((p, i) => p.start = list[i - 1]?.end || (p.first !== p.end ? p.first : null));
+  return list;
+}
+
+function selectFund(fund) {
+  view.fund = fund;
+  const ps = periods(fund), last = ps[ps.length - 1];
+  selectPeriod(last.end, last.start);
+  $('days').scrollLeft = $('days').scrollWidth;
+}
+
+function selectPeriod(end, start) {
+  view.after = end;
+  view.before = start;
+  render();
+}
+
+function render() {
+  const { fund, after, before } = view;
+  for (const b of document.querySelectorAll('.funds button')) b.setAttribute('aria-pressed', b.dataset.fund === fund);
+  $('title').textContent = FUNDS[fund].name;
+  $('cu').textContent = `1 CU(${FUNDS[fund].cu}좌)에 담긴 주식 수량을 공시일끼리 비교합니다.`;
+
+  for (const b of document.querySelectorAll('.units button')) b.setAttribute('aria-pressed', b.dataset.unit === view.unit);
+  $('days').innerHTML = periods(fund).map(p => {
+    const n = p.start ? compare(fund, p.start, p.end).items.filter(i => i.status).length : null;
+    const note = n === null ? '첫 기록' : n ? `${n}종목 변경` : '변동 없음';
+    return `<button data-end="${p.end}" data-start="${p.start || ''}" class="${n ? 'changed' : ''}" aria-pressed="${p.end === after}"><b>${periodLabel(view.unit, p.key)}</b><span>${note}</span></button>`;
+  }).join('');
+
+  const older = dateList(fund).filter(d => d < after).reverse();
+  $('before').innerHTML = older.length ? older.map(d => `<option value="${d}">${shortDate(d)} (${weekday(d)})</option>`).join('') : '<option>없음</option>';
+  $('before').disabled = !older.length;
+  if (before) $('before').value = before;
+
+  const { items, held } = compare(fund, before, after);
+  const count = s => items.filter(i => i.status === s).length;
+  const changed = items.filter(i => i.status).length;
+  $('summary').textContent = !before
+    ? `${shortDate(after)}이 첫 기록이라 비교할 이전 공시가 없습니다. 보유 주식 ${held}종목.`
+    : changed
+      ? `${shortDate(before)}부터 ${shortDate(after)}까지 ${count('변경')}종목 수량이 바뀌었고, 새로 편입 ${count('신규')}종목, 편출 ${count('편출')}종목입니다.`
+      : `${shortDate(before)}부터 ${shortDate(after)}까지 수량이 모두 같습니다.`;
+
+  const themes = new Map([...META.themes, UNSORTED].map(t => [t, { wa: 0, wb: 0 }]));
+  for (const i of items) { const t = themes.get(i.theme); t.wa += i.wa; t.wb += i.wb; }
+  const pct = w => (w * 100).toFixed(1) + '%';
+  const maxW = Math.max(...[...themes.values()].map(t => t.wb));
+  $('themes').innerHTML = [...themes].filter(([, t]) => t.wa || t.wb).sort((x, y) => y[1].wb - x[1].wb).map(([name, t]) => {
+    const d = Math.round((t.wb - t.wa) * 1000) / 10;
+    return `<div class="theme"><span>${name}</span><div class="track"><div class="fill" style="width:${maxW ? t.wb / maxW * 100 : 0}%"></div></div>
+      <span class="w">${pct(t.wb)}</span><span class="d ${d > 0 ? 'up' : d < 0 ? 'down' : ''}">${before ? (d > 0 ? '+' : '') + d.toFixed(1) + '%p' : ''}</span></div>`;
+  }).join('');
+
+  for (const b of document.querySelectorAll('#show button')) {
+    b.setAttribute('aria-pressed', b.dataset.mode === view.mode);
+    b.textContent = b.dataset.mode === 'change' ? `증감 ${changed}` : `보유 종목 ${held}`;
+  }
+  for (const b of document.querySelectorAll('#sort button')) b.setAttribute('aria-pressed', b.dataset.sort === view.sort);
+  $('sort').hidden = view.mode !== 'change';
+
+  const stockCell = (i, mark = '') => `<td><div class="stock"><img class="logo" src="${LOGO(i.ticker)}" alt="" loading="lazy" crossorigin="anonymous" onload="tone(this)" onerror="this.outerHTML='<span class=logo>${i.ticker.slice(0, 2)}</span>'">
+      <div title="${i.r.name}"><b>${i.ko}</b><span class="sub">${i.ticker}</span>${mark}<div class="name">${i.theme}</div></div></div></td>`;
+  const pct2 = w => (w * 100).toFixed(2) + '%';
+
+  if (view.mode === 'holdings') {
+    $('head').innerHTML = '<th>종목</th><th>비중</th><th>수량</th>';
+    $('rows').innerHTML = items.filter(i => !isZero(i.qb)).map(i => `<tr>${stockCell(i)}<td>${pct2(i.wb)}</td><td>${fmt(i.qb)}</td></tr>`).join('');
+    return;
+  }
+
+  $('head').innerHTML = '<th>종목</th><th class="weight">비중</th><th class="before">이전</th><th>이후</th><th>증감</th>';
+  // Items arrive weight-sorted; for 변화율순 the biggest move in each group comes first.
+  const bySize = list => view.sort === 'rate' ? [...list].sort((x, y) => Math.abs(y.rate) - Math.abs(x.rate) || y.weight - x.weight) : list;
+  const groups = [
+    ['늘어난 종목', bySize(items.filter(i => !isZero(i.diff) && !i.diff.startsWith('-')))],
+    ['줄어든 종목', bySize(items.filter(i => i.diff.startsWith('-')))],
+  ].filter(([, list]) => list.length);
+  $('rows').innerHTML = groups.length ? groups.map(([label, list]) => `<tr class="group"><th colspan="5">${label} ${list.length}</th></tr>` + list.map(i => {
+    const mark = i.status === '신규' ? '<span class="mark up">신규 편입</span>' : i.status === '편출' ? '<span class="mark down">편출</span>' : '';
+    const cls = i.diff.startsWith('-') ? 'down' : 'up';
+    const rate = Number.isFinite(i.rate) ? `<div class="name">${i.rate > 0 ? '+' : ''}${(i.rate * 100).toFixed(1)}%</div>` : '';
+    return `<tr>${stockCell(i, mark)}
+    <td class="weight">${pct2(i.weight)}</td><td class="before">${fmt(i.qa)}</td><td>${fmt(i.qb)}</td>
+    <td class="${cls}">${i.diff.startsWith('-') ? '' : '+'}${fmt(i.diff)}${rate}</td></tr>`;
+  }).join('')).join('') : `<tr><td colspan="5" class="empty">${before ? '이 기간에는 수량이 바뀐 종목이 없습니다.' : '첫 기록이라 비교할 이전 공시가 없습니다.'}</td></tr>`;
+}
+
+Promise.all([
+  fetch('fixtures/seed.json').then(r => r.json()),
+  fetch('runtime/state.json').then(r => r.json()).catch(() => ({ funds: {} })),
+  fetch('stocks.json').then(r => r.json()),
+]).then(([seed, state, meta]) => {
+  META = meta;
+  for (const s of seed) snaps[s.fund][s.date] = s.rows;
+  for (const [fund, f] of Object.entries(state.funds || {}))
+    for (const [date, s] of Object.entries(f.snapshots || {})) snaps[fund][date] = s.rows;
+  document.querySelector('.funds').onclick = e => { const b = e.target.closest('[data-fund]'); if (b) selectFund(b.dataset.fund); };
+  $('days').onclick = e => { const b = e.target.closest('[data-end]'); if (b) selectPeriod(b.dataset.end, b.dataset.start || null); };
+  $('before').onchange = e => { view.before = e.target.value; render(); };
+  $('sort').onclick = e => { const b = e.target.closest('[data-sort]'); if (b) { view.sort = b.dataset.sort; render(); } };
+  $('show').onclick =e => { const b = e.target.closest('[data-mode]'); if (b) { view.mode = b.dataset.mode; render(); } };
+  document.querySelector('.units').onclick = e => { const b = e.target.closest('[data-unit]'); if (b) { view.unit = b.dataset.unit; selectFund(view.fund); } };
+  selectFund('time');
+});
+</script>
+</html>
