@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   verify:
-    if: github.ref == 'refs/heads/main' && github.event.repository.private == true && github.repository == 'Sin-Yejun/etf-tracker'
+    if: github.ref == 'refs/heads/main' && github.repository == 'Sin-Yejun/etf-tracker'
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:

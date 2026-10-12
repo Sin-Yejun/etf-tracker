@@ -1,0 +1,40 @@
+name: Publish dashboard
+on:
+  push:
+    branches: [main]
+  # Bot commits made with GITHUB_TOKEN do not fire `push`, so redeploy after each daily run.
+  workflow_run:
+    workflows: [Daily ETF quantity alerts]
+    types: [completed]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  deploy:
+    if: github.repository == 'Sin-Yejun/etf-tracker'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Assemble site
+        run: |
+          mkdir -p _site/fixtures _site/runtime
+          cp dashboard.html _site/index.html
+          cp stocks.json _site/
+          cp fixtures/seed.json _site/fixtures/
+          cp runtime/state.json _site/runtime/
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

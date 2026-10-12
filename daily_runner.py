@@ -148,7 +148,7 @@ def main():
     try:
         event=os.getenv('GITHUB_EVENT_NAME')
         if os.getenv('GITHUB_REPOSITORY')!='Sin-Yejun/etf-tracker' or os.getenv('GITHUB_REF')!='refs/heads/main':
-            raise ValueError('Exact private-repository main-branch workflow required')
+            raise ValueError('Exact repository main-branch workflow required')
         if event not in ('schedule','workflow_dispatch'):raise ValueError('Unsupported trigger')
         return run(dry_run=event!='schedule')
     except BaseException:
