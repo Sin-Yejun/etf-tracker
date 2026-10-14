@@ -1,107 +1,70 @@
-# Scheduled ETF quantity alerts
+# ETF Tracker
 
-The daily workflow is registered for Korean weekdays at 08:30 (UTC Sunday–Thursday 23:30). It uses the existing verified private Telegram destination only when a newly verified disclosure changes exact stock quantities. The first accepted disclosure establishes a baseline without an alert. GitHub scheduling can be delayed.
+미국 주식에 투자하는 국내 액티브 ETF 두 종목이 **매일 무엇을 사고팔았는지** 추적해 텔레그램으로 알려주는 프로젝트입니다.
 
-See [daily operations](docs/daily-alerts.md) for durable repository history, current/historical CU gates, correction holds, CAS-before-send and uncertain-delivery quarantine. Manual execution of the daily workflow is always read-only and sends nothing. Initial scheduled execution and hosted history writes still require operational verification. No separate notification schedule is created.
+- TIME 미국나스닥100액티브 (426030)
+- KOACT 미국나스닥성장기업액티브 (0015B0)
 
-The user approved the daily job contents:write permission to preserve public issuer originals and notification state under runtime/. Bot token and chat ID remain existing GitHub Secrets. The existing web dashboard is unchanged and is not automatically synchronized to this history.
+운용사는 매일 ETF 구성종목(PDF)을 엑셀로 공시합니다. 이 프로젝트는 평일 아침마다 공시를 받아 전날과 비교하고, 종목별 수량이 바뀌었을 때만 알림을 보냅니다. 서버 없이 GitHub Actions만으로 돌아갑니다.
 
----
+**대시보드:** https://sin-yejun.github.io/etf-tracker/
 
-## Original manual preparation package
+## 알림 예시
 
+```
+TIME 미국나스닥100액티브 보유수량 변동
+공시 기준일: 2026-10-13 → 2026-10-14
+변경 주식 23개 · 신규 1 · 제외 0
 
-This is a read-only, manually triggered GitHub Actions dry run for TIME 미국나스닥100액티브 (426030) and KOACT 미국나스닥성장기업액티브 (0015B0). It includes 12 archived official Excel disclosures and their existing snapshot records, with dates from 2026-09-28 through 2026-10-08.
+🆕 Everpure Inc  0 → 22 (+22)
+🔺 애플  50 → 70 (+20)
+🔺 알파벳  69 → 89 (+20)
+🔻 로빈후드  96 → 65 (-31)
+🔻 SK하이닉스  119 → 99 (-20)
+…
+```
 
-## Current scope
+수량은 1 CU(설정 단위)당 공시 수량입니다. 실제 체결 내역이 아니라 공시된 보유 비중의 변화입니다.
 
-- Source code, fixture validation, a manual workflow and local output artifacts are prepared
-- No repository creation/push, workflow dispatch, scheduled job, live issuer probe, or notification has been performed as part of this package's local verification
-- The workflow has only `workflow_dispatch`; no push, PR or scheduled trigger
-- `contents: read`, no custom secrets, and checkout credentials are not persisted
-- The optional issuer probe makes only two GET requests to fixed official URLs for the supplied date
-- No sender, bot token handling, GitHub state commits, database integration or durable outbox is connected
-- `notification-plan.mjs` and `delivery_state.py` are independent, pure preparation helpers. They cannot send anything. A local runner's filesystem is not durable delivery state
+## 동작 방식
 
-## Local usage
+```
+GitHub Actions (평일 08:30 KST)
+  ├─ 운용사 공식 엑셀 다운로드 → 형식·날짜·CU 검증
+  ├─ 직전 공시와 종목별 수량 비교
+  ├─ 바뀐 종목이 있으면 텔레그램 발송
+  └─ 원본·상태를 runtime 브랜치에 커밋 → 대시보드(GitHub Pages) 재배포
+```
 
-Use Python 3.12 on Linux or macOS. Fixture validation is offline after dependency installation. The live probe uses POSIX signal timers and is not supported on native Windows; the supplied GitHub runner is Ubuntu.
+## 신경 쓴 부분
+
+- **틀린 알림보다 알림 없음이 낫다.** 다운로드 실패나 아직 올라오지 않은 공시를 "변동 없음"으로 처리하지 않습니다. 공시 날짜와 CU 크기가 확인되지 않으면 비교 자체를 보류합니다.
+- **정확한 수량 계산.** 엑셀 숫자를 문자열로 읽고 정수 연산으로 차이를 구합니다. 부동소수점 오차나 반올림 임계값이 없습니다.
+- **중복 발송 방지.** 발송 전에 "보내는 중" 상태를 먼저 저장(compare-and-swap)하고, 발송 후 완료를 기록합니다. 중간에 실패하면 다음 실행에서 다시 보내지 않고 확인이 필요한 상태로 둡니다.
+- **서버·DB 없는 영속 저장.** 상태와 공시 원본을 GitHub Contents API로 별도 `runtime` 브랜치에 저장합니다. `main`에는 코드 이력만 남습니다.
+- **입력을 믿지 않는다.** 고정된 공식 URL만 요청하고, 리다이렉트·과대 응답·수식·외부 링크가 든 엑셀은 거부합니다. 의존성은 해시로 고정했습니다.
+
+## 구조
+
+| 경로 | 역할 |
+|---|---|
+| `etf_collector/` | 공시 다운로드, 엑셀 파싱·검증, 수량 비교 |
+| `cu_validation.py` | 운용사 페이지에서 CU 크기 확인 |
+| `daily_engine.py` | 상태 관리, 변동 판단, 알림 메시지 생성 |
+| `daily_runner.py` | 매일 실행되는 진입점 |
+| `github_history.py` | `runtime` 브랜치에 상태 저장 |
+| `dashboard.html`, `stocks.json` | 대시보드, 종목 한글명·테마 |
+| `.github/workflows/` | 정기 알림, 대시보드 배포, 수동 점검 |
+
+## 로컬 실행
+
+Python 3.12 기준입니다.
 
 ```sh
-python -m venv .venv
-. .venv/bin/activate
+python -m venv .venv && . .venv/bin/activate
 python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
-python -m unittest discover -s tests -v
-python -m unittest test_delivery_state -v
-python -m etf_collector.collect --date 2026-10-08 --output output/my-fixture-run
+python -m unittest discover -s tests
+python -m etf_collector.collect --date 2026-10-08 --output output/run1
 ```
 
-An optional live download can be requested explicitly:
-
-```sh
-python -m etf_collector.collect --date 2026-10-08 --probe --output output/my-issuer-probe
-```
-
-Every output directory must be new. A repeated command with the same output path fails rather than overwriting evidence. Each run writes `report.json`, `summary.txt`, and content-addressed raw response files in `originals/`. A failed HTTP/Excel/date validation retains bounded response bytes when available; a timeout or oversize response cannot preserve a complete original. Archived input files remain unchanged.
-
-## GitHub manual run, after an authorized upload
-
-Open Actions → Manual ETF quantity dry run → Run workflow. Supply the official `as_of_date` as `YYYY-MM-DD`. Leave `probe_issuers` false for archived fixtures, or explicitly enable it to download from the issuers. Inputs are passed as quoted environment variables and validated as real calendar dates, never interpolated into shell commands.
-
-The workflow installs the hash-locked dependency, runs the tests, produces the report, and retains output artifacts for 7 days even when the collection step reports an error. This artifact retention is diagnostic storage, not a permanent daily history. No custom secret is required. GitHub provides its standard read-only checkout/runtime mechanisms; this package does not configure credentials.
-
-## Quantity and provenance contract
-
-The Python parser ports the existing site's `lib/parser.ts` and `lib/quantities.ts` source-identity and raw-quantity rules. All 12 parsed originals must exactly match the corresponding `fixtures/seed.json` rows and SHA-256 values.
-
-- KOACT identity: ISIN from the official sheet, not name or translated ticker
-- TIME identity: uppercased, whitespace-normalized official source code
-- Equity filtering: source code ends in `EQUITY`; cash/other rows are retained in snapshots but excluded from equity comparisons
-- Quantities: exact canonical decimal strings and scaled integer subtraction, without an epsilon or rounding threshold
-- A position addition means exact zero → positive quantity; removal means positive → exact zero, whether the zero row is present or absent. Missing → zero is unchanged
-- XLSX numeric XML values are read as text. Legacy XLS numeric cells are stored as IEEE-754 in Excel; their shortest round-trip decimal representation matches the existing parser. Arithmetic thereafter is exact; precision absent from the original binary file cannot be recovered
-- KOACT date evidence: the internal workbook date and fund title
-- Live TIME date evidence: the date in the actual HTTP `Content-Disposition` filename; TIME worksheets do not contain a date. The fixed endpoint identifies the selected fund
-- Archived TIME fixtures record that filename-date evidence existed, but the original HTTP header was not retained. Dry-run reports explicitly label this as archived evidence rather than claiming a newly observed response filename
-- HTTP success alone is insufficient: magic bytes, format, source identity, headers, date and minimum stock count must validate
-
-## Baselines and CU limitations
-
-The baseline is always the latest strictly earlier verified fixture in this package. It is labeled `archived_fixture` in the report. It is **not** the preceding scheduled run or necessarily the previous trading day's disclosure. The collector does not append new snapshots to the archive. Production daily history is future work.
-
-Configured CU profiles are TIME 20,000 ETF units and KOACT 50,000 ETF units. The profile is dated 2026-10-08; these workbooks do not independently prove the CU size. The archived comparison therefore uses that configured profile. For source dates after 2026-10-08, parsing may succeed but comparison is suppressed with `verified_cu_review_required` until issuer CU verification and a dated profile update are implemented. Do not advance the profile date without checking the official issuer source and preserving the evidence.
-
-Quantity differences describe published holdings per one CU. They do not establish actual executed trades or fund-wide buying/selling, and changes in CU size or corporate actions can affect interpretation.
-
-## Statuses
-
-- `verified_changed`: date and source verified; nonzero equity quantity differences against the archived baseline
-- `verified_unchanged`: date and source verified; zero equity quantity differences against the archived baseline
-- `verified_no_baseline`: source verified; no strictly earlier archived disclosure
-- `verified_cu_review_required`: source date verified; CU profile is too old for comparison
-- `fixture_error`, `download_error`, `validation_error`: collection cannot establish a current disclosure; `asOf` is null, `errors` is populated, and no comparison is emitted
-
-A failure or a not-yet-published file never becomes “unchanged.” `requestedDate`, verified `asOf`, baseline date and collection timestamp remain separate. In a dry run, `archivedCollectedAt` retains the original collection timestamp.
-
-## Boundaries and security controls
-
-- URLs can only be constructed for the two fixed issuer HTTPS endpoints; no user-provided URL is accepted
-- Every redirect is refused; TLS verification is left enabled
-- 10-second socket timeout, 25-second total per-issuer deadline, 4 MiB response cap
-- XLSX caps: 100 ZIP entries, 16 MiB expanded data, 2,000 rows, 32 columns; duplicate members/cells, DTD/entities, external worksheet links and formulas are rejected
-- XLS reader: `xlrd==2.0.1`, wheel SHA-256 pinned in `requirements.lock`; no macros are executed
-- Three official Actions are pinned by verified full commit SHA; see `docs/dependency-sources.md`
-- Python tracks the 3.12 security-patch line rather than pinning an obsolete patch; local tests used Python 3.12.14. The hosted runner image and runtime tools are not bit-for-bit locked
-- Outbound notifications, automatic retries and permanent data persistence require separate reviewed implementation and authorization
-
-## Verified result
-
-Local clean-venv installation validated the dependency hash. The original Oct 7 → Oct 8 comparison shows:
-
-- TIME: 41 equities, zero changed quantities
-- KOACT: 45 equities in the union, 44 changed quantities, one new position and no exits
-- SPCX: +63
-- AMAT: −0.01
-- KOACT: 43 negative quantity deltas
-
-See `docs/validation.md` for executed versus unexecuted checks. See `docs/telegram-setup.md` for the separately prepared notification setup guidance.
+텔레그램 설정과 운영 세부 사항은 [`docs/`](docs/)에 있습니다.
