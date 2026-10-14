@@ -28,13 +28,20 @@ jobs:
         with:
           ref: main
           persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: runtime
+          path: _runtime
+          sparse-checkout: runtime/state.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - name: Assemble site
         run: |
           mkdir -p _site/fixtures _site/runtime
           cp dashboard.html _site/index.html
           cp stocks.json _site/
           cp fixtures/seed.json _site/fixtures/
-          cp runtime/state.json _site/runtime/
+          cp _runtime/runtime/state.json _site/runtime/
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
       - id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

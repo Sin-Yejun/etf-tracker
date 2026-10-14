@@ -10,6 +10,8 @@ import re
 import ssl
 
 REPOSITORY='Sin-Yejun/etf-tracker'
+# Bot commits go to their own branch so main keeps only human history.
+BRANCH='runtime'
 MAX_STATE=32*1024*1024
 
 class HistoryError(Exception): pass
@@ -25,7 +27,7 @@ class GitHubHistory:
         try:
             c=http.client.HTTPSConnection('api.github.com',timeout=20,context=ssl.create_default_context())
             headers={'Authorization':'Bearer '+self.token,'Accept':'application/vnd.github.raw+json' if raw else 'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':'etf-private-history','Content-Type':'application/json'}
-            c.request(method,'/repos/'+REPOSITORY+'/contents/'+path+('?ref=main' if method=='GET' else ''),body=None if payload is None else json.dumps(payload).encode(),headers=headers)
+            c.request(method,'/repos/'+REPOSITORY+'/contents/'+path+('?ref='+BRANCH if method=='GET' else ''),body=None if payload is None else json.dumps(payload).encode(),headers=headers)
             r=c.getresponse();body=r.read(MAX_STATE+1)
             if len(body)>MAX_STATE:raise HistoryError('History size limit reached; stop for maintenance')
             if r.status==404 and method=='GET':return None
@@ -42,7 +44,7 @@ class GitHubHistory:
     def blob_sha(data):return hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()
     def put(self,path,data,previous=None):
         if len(data)>MAX_STATE:raise HistoryError('History size limit reached')
-        payload={'message':'Persist ETF disclosure and notification state','branch':'main','content':base64.b64encode(data).decode()}
+        payload={'message':'Persist ETF disclosure and notification state','branch':BRANCH,'content':base64.b64encode(data).decode()}
         if previous is not None:payload['sha']=self.blob_sha(previous)
         # No mutation retry; ambiguous writes are reconciled by a fresh read.
         try:self.request('PUT',path,payload)

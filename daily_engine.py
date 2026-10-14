@@ -26,10 +26,14 @@ from copy import deepcopy
 import hashlib
 import json
 import re
+from pathlib import Path
 
 from etf_collector.core import FUNDS, MAX_ROWS, compare, decimal, source_url, valid_date
 
 SCHEMA_VERSION = 1
+# Same ticker→Korean name map the dashboard uses; unknown tickers keep the source name.
+KO_NAMES = {t: v['ko'] for t, v in json.loads(
+    (Path(__file__).with_name('stocks.json')).read_text(encoding='utf-8'))['stocks'].items()}
 MAX_MESSAGE_CHARS = 3500
 VERIFIED_STATUSES = frozenset({
     'verified_changed', 'verified_unchanged', 'verified_no_baseline',
@@ -215,7 +219,9 @@ def notification_parts(fund, before, after, changes, cu, *, max_chars=MAX_MESSAG
     """Korean plain text with every exact change, source dates and CU caveat."""
     if type(max_chars) is not int or not 800 <= max_chars <= MAX_MESSAGE_CHARS:
         raise ValueError('Message limit must be between 800 and 3500 UTF-16 units')
-    changed = sorted((r for r in changes if r['delta'] != '0'), key=lambda r: r['id'])
+    order = {'added': 0, 'removed': 3}
+    changed = sorted((r for r in changes if r['delta'] != '0'),
+                     key=lambda r: (order.get(r['status'], 1 if not r['delta'].startswith('-') else 2), r['id']))
     if not changed:
         return []
     added = sum(r['status'] == 'added' for r in changed)
@@ -228,11 +234,11 @@ def notification_parts(fund, before, after, changes, cu, *, max_chars=MAX_MESSAG
     footer = f"\n공식 원본(전): {before['sourceUrl']}\n공식 원본(후): {after['sourceUrl']}"
     lines = []
     for row in changed:
-        label = ('신규' if row['status'] == 'added' else '제외' if row['status'] == 'removed'
-                 else '감소' if row['delta'].startswith('-') else '증가')
+        mark = ('🆕' if row['status'] == 'added' else '❌' if row['status'] == 'removed'
+                else '🔻' if row['delta'].startswith('-') else '🔺')
         delta = row['delta'] if row['delta'].startswith('-') else '+' + row['delta']
-        lines.append(f"• {_plain(row['name'])} ({_plain(row.get('code') or row['id'])}) [{label}]\n"
-                     f"  {decimal(row['before'])} → {decimal(row['after'])} (변동 {delta})\n")
+        name = KO_NAMES.get(str(row.get('code') or row['id']).split(' ')[0].upper(), row['name'])
+        lines.append(f"{mark} {_plain(name)}  {decimal(row['before'])} → {decimal(row['after'])} ({delta})\n")
     budget = max_chars - _units(base) - _units(footer) - 40
     if budget < 1:
         raise ValueError('Source metadata exceeds the message size budget')

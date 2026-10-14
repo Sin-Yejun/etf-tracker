@@ -281,12 +281,23 @@ class EventAndTextTests(unittest.TestCase):
         self.assertGreater(len(parts), 1)
         whole = ''.join(parts)
         for i in range(300):
-            self.assertIn(f'S{i:04} US Equity', whole)
-        self.assertEqual(whole.count('변동 +0.00000000000001'), 300)
+            self.assertIn('종목' + str(i) + '😀', whole)
+        self.assertEqual(whole.count('(+0.00000000000001)'), 300)
         for i, text in enumerate(parts, 1):
             self.assertLessEqual(len(text.encode('utf-16-le')) // 2, 3500)
             for term in (BEFORE, AFTER, '1 CU = 20000', '실제 매매내역이 아니며', f'({i}/{len(parts)})'):
                 self.assertIn(term, text)
+
+    def test_known_tickers_use_korean_names_without_ticker(self):
+        before = [stock('AAPL', '50', 'Apple Inc'), stock('ZZZZ', '5', 'Unknown Co')]
+        after = [stock('AAPL', '70', 'Apple Inc'), stock('ZZZZ', '3', 'Unknown Co')]
+        text = ''.join(notification_parts('time', {'date': BEFORE, 'sourceUrl': source_url('time', BEFORE)},
+                                          {'date': AFTER, 'sourceUrl': source_url('time', AFTER)},
+                                          compare(before, after), 20000))
+        self.assertIn('🔺 애플  50 → 70 (+20)', text)
+        self.assertIn('🔻 Unknown Co  5 → 3 (-2)', text)
+        self.assertNotIn('EQUITY', text.upper())
+        self.assertLess(text.index('애플'), text.index('Unknown Co'))
 
     def test_oversize_single_source_name_is_split_without_loss(self):
         long_name = 'Z' * 20000
