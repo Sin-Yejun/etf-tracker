@@ -23,10 +23,12 @@ Only definitive provider rejection 429 with retry_at enables automatic retry.
 from __future__ import annotations
 
 from copy import deepcopy
+from fractions import Fraction
 import hashlib
 import json
 import re
 from pathlib import Path
+from statistics import median_low
 
 from etf_collector.core import FUNDS, MAX_ROWS, compare, decimal, source_url, valid_date
 
@@ -215,23 +217,48 @@ def _split_text(text, limit):
     return chunks
 
 
-def notification_parts(fund, before, after, changes, cu, *, max_chars=MAX_MESSAGE_CHARS):
-    """Korean plain text with every exact change, source dates and CU caveat."""
+def proportional_changes(changes):
+    """Ids whose change is only the fund-wide per-CU rescale, and that ratio.
+
+    `changes` must be the full comparison, unchanged stocks included. On most
+    days KOACT rescales every per-CU quantity by one common ratio; a stock
+    within rounding of that ratio was not traded. When most stocks are
+    unchanged (TIME) the ratio is 1 and every change is reported.
+    """
+    held = [(r, Fraction(decimal(r['before'])), Fraction(decimal(r['after']))) for r in changes]
+    held = [(r, b, a) for r, b, a in held if b > 0 and a > 0]
+    if not held:
+        return set(), Fraction(1)
+    ratio = median_low(a / b for _, b, a in held)
+    if ratio == 1:
+        return set(), ratio
+    # One unit in the fund's disclosed precision; both roundings fit in 1.5 units.
+    places = max(len(decimal(v).partition('.')[2]) for r, _, _ in held for v in (r['before'], r['after']))
+    tolerance = Fraction(3, 2) / 10 ** places
+    fitted = {r['id'] for r, b, a in held if a != b and abs(a - b * ratio) <= tolerance}
+    if len(fitted) * 2 <= len(held):  # not fund-wide: report every change
+        return set(), Fraction(1)
+    return fitted, ratio
+
+
+def notification_parts(fund, before, after, changes, *, max_chars=MAX_MESSAGE_CHARS):
+    """Korean plain text with every traded change and source dates.
+
+    Changes explained by the common per-CU rescale are summarised in one line.
+    """
     if type(max_chars) is not int or not 800 <= max_chars <= MAX_MESSAGE_CHARS:
         raise ValueError('Message limit must be between 800 and 3500 UTF-16 units')
     order = {'added': 0, 'removed': 3}
-    changed = sorted((r for r in changes if r['delta'] != '0'),
+    rescaled, ratio = proportional_changes(changes)
+    changed = sorted((r for r in changes if r['delta'] != '0' and r['id'] not in rescaled),
                      key=lambda r: (order.get(r['status'], 1 if not r['delta'].startswith('-') else 2), r['id']))
-    if not changed:
+    if not changed and not rescaled:
         return []
     added = sum(r['status'] == 'added' for r in changed)
     removed = sum(r['status'] == 'removed' for r in changed)
     base = (f"{FUNDS[fund]['name']} 보유수량 변동\n"
             f"공시 기준일: {before['date']} → {after['date']}\n"
-            f"변경 주식 {len(changed)}개 · 신규 {added} · 제외 {removed}\n"
-            f"기준: 1 CU = {decimal(cu)} ETF좌당 공시수량\n"
-            "ETF 전체 보유량·실제 매매내역이 아니며, 현금은 제외합니다.\n")
-    footer = f"\n공식 원본(전): {before['sourceUrl']}\n공식 원본(후): {after['sourceUrl']}"
+            f"변경 주식 {len(changed)}개 · 신규 {added} · 제외 {removed}\n")
     lines = []
     for row in changed:
         mark = ('🆕' if row['status'] == 'added' else '❌' if row['status'] == 'removed'
@@ -239,11 +266,14 @@ def notification_parts(fund, before, after, changes, cu, *, max_chars=MAX_MESSAG
         delta = row['delta'] if row['delta'].startswith('-') else '+' + row['delta']
         name = KO_NAMES.get(str(row.get('code') or row['id']).split(' ')[0].upper(), row['name'])
         lines.append(f"{mark} {_plain(name)}  {decimal(row['before'])} → {decimal(row['after'])} ({delta})\n")
-    budget = max_chars - _units(base) - _units(footer) - 40
+    if rescaled:
+        lines.append(f"➖ {len(rescaled)}종목 일괄 {float((ratio - 1) * 100):+.2f}% (비례 조정)\n")
+    budget = max_chars - _units(base) - 40
     if budget < 1:
         raise ValueError('Source metadata exceeds the message size budget')
     body_chunks = _split_text(''.join(lines), budget)
-    result = [f'{base}({i}/{len(body_chunks)})\n\n{body}{footer}'
+    n = len(body_chunks)
+    result = [base + (f'({i}/{n})\n' if n > 1 else '') + '\n' + body
               for i, body in enumerate(body_chunks, 1)]
     if any(_units(text) > max_chars for text in result):
         raise ValueError('Message exceeds its size budget')
@@ -352,7 +382,8 @@ def ingest_collection(state, collection, recipient, cu_profile, *, now):
         record['held'].pop(date, None)
         return outcome('baseline')
     stock = lambda s: [r for r in s['rows'] if r['kind'] == 'stock']
-    changes = [r for r in compare(stock(before), stock(snapshot)) if r['delta'] != '0']
+    compared = compare(stock(before), stock(snapshot))
+    changes = [r for r in compared if r['delta'] != '0']
     snapshot['beforeDate'] = before['date']
     snapshot['status'] = 'changed' if changes else 'unchanged'
     record['snapshots'][date] = snapshot
@@ -361,7 +392,7 @@ def ingest_collection(state, collection, recipient, cu_profile, *, now):
         return outcome('unchanged', beforeDate=before['date'], changedCount=0)
     key = event_key(recipient, fund, before['date'], date, before['rows'], snapshot['rows'], profile['cu'])
     if key not in result['outbox']:
-        messages = notification_parts(fund, before, snapshot, changes, profile['cu'])
+        messages = notification_parts(fund, before, snapshot, compared)
         result['outbox'][key] = {
             'eventKey': key, 'recipientKey': recipient_key(recipient), 'fund': fund,
             'beforeDate': before['date'], 'afterDate': date,

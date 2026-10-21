@@ -273,38 +273,68 @@ class EventAndTextTests(unittest.TestCase):
         self.assertEqual(len(key), 64)
 
     def test_all_changes_are_in_numbered_bounded_korean_messages(self):
-        before_rows = [stock(f'S{i:04}', '1', '종목' + str(i) + '😀' * 15) for i in range(300)]
-        after_rows = [dict(r, quantity='1.00000000000001') for r in before_rows]
+        before_rows = [stock(f'S{i:04}', '100', '종목' + str(i) + '😀' * 15) for i in range(300)]
+        after_rows = [dict(r, quantity='200.00000000000001' if i % 2 else '50') for i, r in enumerate(before_rows)]
         before = {'date': BEFORE, 'sourceUrl': source_url('time', BEFORE)}
         after = {'date': AFTER, 'sourceUrl': source_url('time', AFTER)}
-        parts = notification_parts('time', before, after, compare(before_rows, after_rows), 20000)
+        parts = notification_parts('time', before, after, compare(before_rows, after_rows))
         self.assertGreater(len(parts), 1)
         whole = ''.join(parts)
         for i in range(300):
             self.assertIn('종목' + str(i) + '😀', whole)
-        self.assertEqual(whole.count('(+0.00000000000001)'), 300)
+        self.assertEqual(whole.count('(+100.00000000000001)'), 150)
+        self.assertEqual(whole.count('(-50)'), 150)
+        self.assertNotIn('비례 조정', whole)
         for i, text in enumerate(parts, 1):
             self.assertLessEqual(len(text.encode('utf-16-le')) // 2, 3500)
-            for term in (BEFORE, AFTER, '1 CU = 20000', '실제 매매내역이 아니며', f'({i}/{len(parts)})'):
+            for term in (BEFORE, AFTER, f'({i}/{len(parts)})'):
                 self.assertIn(term, text)
+            self.assertNotIn('http', text)
 
     def test_known_tickers_use_korean_names_without_ticker(self):
         before = [stock('AAPL', '50', 'Apple Inc'), stock('ZZZZ', '5', 'Unknown Co')]
         after = [stock('AAPL', '70', 'Apple Inc'), stock('ZZZZ', '3', 'Unknown Co')]
         text = ''.join(notification_parts('time', {'date': BEFORE, 'sourceUrl': source_url('time', BEFORE)},
                                           {'date': AFTER, 'sourceUrl': source_url('time', AFTER)},
-                                          compare(before, after), 20000))
+                                          compare(before, after)))
         self.assertIn('🔺 애플  50 → 70 (+20)', text)
         self.assertIn('🔻 Unknown Co  5 → 3 (-2)', text)
         self.assertNotIn('EQUITY', text.upper())
+        self.assertNotIn('(1/1)', text)
+        self.assertNotIn('http', text)
         self.assertLess(text.index('애플'), text.index('Unknown Co'))
+
+    def test_fund_wide_rescale_is_one_line_but_trades_are_listed(self):
+        # Shape of KOACT 2026-10-16 -> 10-19: everything +1.78% at 0.01 precision,
+        # plus a real sell, a new position and an exit.
+        names = [f'R{i:02}' for i in range(10)]
+        before = [stock(n, q) for n, q in zip(names, ('11.32', '33.62', '26.91', '29.42', '7.63',
+                                                    '1.06', '178.1', '20.43', '40.17', '41.67'))]
+        before += [stock('DELL', '57.99'), stock('GONE', '5')]
+        after = [stock(n, q) for n, q in zip(names, ('11.52', '34.22', '27.4', '29.95', '7.76',
+                                                   '1.07', '181.29', '20.79', '40.89', '42.42'))]
+        after += [stock('DELL', '16.41'), stock('AAPL', '40.59', 'Apple Inc')]
+        text = ''.join(notification_parts('koact', {'date': BEFORE}, {'date': AFTER}, compare(before, after)))
+        self.assertIn('변경 주식 3개 · 신규 1 · 제외 1', text)
+        self.assertIn('🆕 애플  0 → 40.59 (+40.59)', text)
+        self.assertIn('🔻 델 테크놀로지스  57.99 → 16.41 (-41.58)', text)
+        self.assertIn('❌ GONE  5 → 0 (-5)', text)
+        self.assertIn('➖ 10종목 일괄 +1.78% (비례 조정)', text)
+        self.assertNotIn('R0', text)
+
+    def test_integer_one_share_change_is_not_hidden(self):
+        before = [stock(f'S{i}', '50') for i in range(5)]
+        after = [stock('S0', '51')] + before[1:]
+        text = ''.join(notification_parts('time', {'date': BEFORE}, {'date': AFTER}, compare(before, after)))
+        self.assertIn('🔺 S0  50 → 51 (+1)', text)
+        self.assertNotIn('비례 조정', text)
 
     def test_oversize_single_source_name_is_split_without_loss(self):
         long_name = 'Z' * 20000
         before, after = rows(), rows('2')
         after[0]['name'] = long_name
         parts = notification_parts('time', {'date': BEFORE, 'sourceUrl': source_url('time', BEFORE)},
-                                   {'date': AFTER, 'sourceUrl': source_url('time', AFTER)}, compare(before, after), 20000)
+                                   {'date': AFTER, 'sourceUrl': source_url('time', AFTER)}, compare(before, after))
         self.assertEqual(sum(p.count('Z') for p in parts), 20000)
         self.assertTrue(all(len(p) <= 3500 for p in parts))
 

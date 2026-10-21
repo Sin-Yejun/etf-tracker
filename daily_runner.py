@@ -99,16 +99,9 @@ def notice_text(notice):
     name=FUNDS[notice['fund']]['name']
     if notice['kind']=='unchanged':
         return (f"{name} 보유수량 변동 없음\n"
-                f"공시 기준일: {notice['beforeDate']} → {notice['afterDate']}\n"
-                "변경 주식 0개 · 새 공시가 확인됐고 수량은 그대로입니다.\n"
-                f"기준: 1 CU = {notice['cu']} ETF좌당 공시수량\n"
-                "ETF 전체 보유량·실제 매매내역이 아니며, 현금은 제외합니다.\n"
-                f"공식 원본(전): {source_url(notice['fund'],notice['beforeDate'])}\n"
-                f"공식 원본(후): {source_url(notice['fund'],notice['afterDate'])}")
+                f"공시 기준일: {notice['beforeDate']} → {notice['afterDate']}")
     return (f"{name} 오늘 새 공시 없음\n"
-            f"확인일: {notice['today']} · 최신 공시 기준일: {notice['afterDate']}\n"
-            "새 공시가 없어 오늘은 수량 변동 알림이 없습니다. 정기 점검은 정상 실행됐습니다.\n"
-            f"공식 원본(최신): {source_url(notice['fund'],notice['afterDate'])}")
+            f"최신 공시 기준일: {notice['afterDate']}")
 
 
 def send_notice(notice,token,cid,call=request):
@@ -130,7 +123,8 @@ def notice_already_sent(history,today,notice):
     try:previous=json.loads(history.read('runtime/latest-run.json') or b'null')
     except Exception:return False
     if not isinstance(previous,dict) or not str(previous.get('checkedAt','')).startswith(today.isoformat()):return False
-    return any(isinstance(n,dict) and n.get('status')=='sent' and n.get('fund')==notice['fund'] and n.get('afterDate')==notice['afterDate'] for n in previous.get('notices',[]))
+    # 'already_sent_today' carries the guard forward to a third same-day run.
+    return any(isinstance(n,dict) and n.get('status') in ('sent','already_sent_today') and n.get('fund')==notice['fund'] and n.get('afterDate')==notice['afterDate'] for n in previous.get('notices',[]))
 
 
 def run(dry_run=True):
@@ -165,7 +159,7 @@ def run(dry_run=True):
         if store:store.save(state)
         report['results'].append({'fund':fund,'outcome':outcome,'attempts':attempts,'cuVerified':profile is not None,'cuDiagnostic':collection.get('cuDiagnostic','not_checked'),'sourceStatus':collection['status']})
         if outcome['status']=='unchanged':
-            notices.append({'fund':fund,'kind':'unchanged','beforeDate':outcome['beforeDate'],'afterDate':outcome['asOf'],'cu':profile['cu']})
+            notices.append({'fund':fund,'kind':'unchanged','beforeDate':outcome['beforeDate'],'afterDate':outcome['asOf']})
         elif outcome['status']=='duplicate' and outcome.get('asOf'):
             notices.append({'fund':fund,'kind':'no_new_disclosure','afterDate':outcome['asOf'],'today':today.isoformat()})
         print(f"{fund}: {outcome['status']} · source {outcome.get('asOf') or 'unverified'}")

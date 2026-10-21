@@ -68,7 +68,7 @@ class RunnerTests(unittest.TestCase):
  def test_unchanged_notice_text_and_verified_send(self):
   notice={'fund':'koact','kind':'unchanged','beforeDate':'2026-10-07','afterDate':'2026-10-08','cu':50000}
   text=notice_text(notice)
-  self.assertIn('보유수량 변동 없음',text);self.assertIn('2026-10-07 → 2026-10-08',text);self.assertIn('실제 매매내역이 아니며',text)
+  self.assertIn('보유수량 변동 없음',text);self.assertIn('2026-10-07 → 2026-10-08',text);self.assertNotIn('http',text)
   calls=[]
   def call(token,method,payload):calls.append(payload);return {'message_id':7,'chat':{'id':123}}
   self.assertEqual(send_notice(notice,'fake','123',call),7);self.assertEqual(calls[0]['text'],text);self.assertEqual(calls[0]['chat_id'],123)
@@ -89,6 +89,10 @@ class RunnerTests(unittest.TestCase):
   self.assertFalse(notice_already_sent(H(doc),dt.date(2026,10,10),notice))
   self.assertFalse(notice_already_sent(H(None),dt.date(2026,10,9),notice))
   self.assertFalse(notice_already_sent(H(doc),dt.date(2026,10,9),{**notice,'fund':'time'}))
+  rerun=json.dumps({'checkedAt':'2026-10-09T09:00:00+09:00','notices':[{'fund':'koact','kind':'no_new_disclosure','afterDate':'2026-10-08','status':'already_sent_today'}]}).encode()
+  self.assertTrue(notice_already_sent(H(rerun),dt.date(2026,10,9),notice))
+  failed=json.dumps({'checkedAt':'2026-10-09T09:00:00+09:00','notices':[{'fund':'koact','kind':'no_new_disclosure','afterDate':'2026-10-08','status':'send_failed'}]}).encode()
+  self.assertFalse(notice_already_sent(H(failed),dt.date(2026,10,9),notice))
  def test_cu_fetch_failure_is_per_fund_hold_not_crash(self):
   raw=(ROOT/'fixtures/originals/koact-2026-10-08.xls').read_bytes()
   def cu_fetch(f):raise TimeoutError()
