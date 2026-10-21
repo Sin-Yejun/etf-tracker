@@ -1,7 +1,7 @@
 import copy,datetime as dt,hashlib,json,unittest
 from pathlib import Path
 from unittest.mock import patch
-from daily_runner import latest_collection,dispatch_pending,validate_recipient
+from daily_runner import latest_collection,dispatch_pending,validate_recipient,notice_text,send_notice,notice_already_sent
 from daily_engine import new_state,ingest_collection,pending_parts,recover_inflight
 from github_history import HistoryError
 ROOT=Path(__file__).parent
@@ -65,6 +65,30 @@ class RunnerTests(unittest.TestCase):
   with patch('daily_runner.time.time',return_value=1800000002):
    result,sent=dispatch_pending(state,store,'fake','123','run',lambda *a:self.fail('unchanged fund send'),lambda _:None,eligible_funds={'time'})
   self.assertEqual(sent,0);self.assertEqual(store.calls,0)
+ def test_unchanged_notice_text_and_verified_send(self):
+  notice={'fund':'koact','kind':'unchanged','beforeDate':'2026-10-07','afterDate':'2026-10-08','cu':50000}
+  text=notice_text(notice)
+  self.assertIn('보유수량 변동 없음',text);self.assertIn('2026-10-07 → 2026-10-08',text);self.assertIn('실제 매매내역이 아니며',text)
+  calls=[]
+  def call(token,method,payload):calls.append(payload);return {'message_id':7,'chat':{'id':123}}
+  self.assertEqual(send_notice(notice,'fake','123',call),7);self.assertEqual(calls[0]['text'],text);self.assertEqual(calls[0]['chat_id'],123)
+ def test_no_new_disclosure_notice_does_not_claim_unchanged(self):
+  notice={'fund':'koact','kind':'no_new_disclosure','afterDate':'2026-10-08','today':'2026-10-09'}
+  text=notice_text(notice)
+  self.assertIn('오늘 새 공시 없음',text);self.assertIn('최신 공시 기준일: 2026-10-08',text);self.assertNotIn('수량은 그대로',text)
+ def test_notice_send_to_wrong_recipient_is_rejected(self):
+  notice={'fund':'koact','kind':'unchanged','beforeDate':'2026-10-07','afterDate':'2026-10-08','cu':50000}
+  with self.assertRaises(ValueError):send_notice(notice,'fake','123',lambda *a:{'message_id':1,'chat':{'id':999}})
+ def test_notice_already_sent_matches_same_day_and_disclosure(self):
+  class H:
+   def __init__(self,doc):self.doc=doc
+   def read(self,path):return self.doc
+  doc=json.dumps({'checkedAt':'2026-10-09T08:30:00+09:00','notices':[{'fund':'koact','kind':'unchanged','afterDate':'2026-10-08','status':'sent'}]}).encode()
+  notice={'fund':'koact','kind':'no_new_disclosure','afterDate':'2026-10-08','today':'2026-10-09'}
+  self.assertTrue(notice_already_sent(H(doc),dt.date(2026,10,9),notice))
+  self.assertFalse(notice_already_sent(H(doc),dt.date(2026,10,10),notice))
+  self.assertFalse(notice_already_sent(H(None),dt.date(2026,10,9),notice))
+  self.assertFalse(notice_already_sent(H(doc),dt.date(2026,10,9),{**notice,'fund':'time'}))
  def test_cu_fetch_failure_is_per_fund_hold_not_crash(self):
   raw=(ROOT/'fixtures/originals/koact-2026-10-08.xls').read_bytes()
   def cu_fetch(f):raise TimeoutError()
