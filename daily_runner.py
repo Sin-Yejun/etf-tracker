@@ -95,6 +95,44 @@ def dispatch_pending(state,store,token,cid,run_id,call=request,sleep=time.sleep,
     return state,sent
 
 
+def notice_text(notice):
+    name=FUNDS[notice['fund']]['name']
+    if notice['kind']=='unchanged':
+        return (f"{name} 보유수량 변동 없음\n"
+                f"공시 기준일: {notice['beforeDate']} → {notice['afterDate']}\n"
+                "변경 주식 0개 · 새 공시가 확인됐고 수량은 그대로입니다.\n"
+                f"기준: 1 CU = {notice['cu']} ETF좌당 공시수량\n"
+                "ETF 전체 보유량·실제 매매내역이 아니며, 현금은 제외합니다.\n"
+                f"공식 원본(전): {source_url(notice['fund'],notice['beforeDate'])}\n"
+                f"공식 원본(후): {source_url(notice['fund'],notice['afterDate'])}")
+    return (f"{name} 오늘 새 공시 없음\n"
+            f"확인일: {notice['today']} · 최신 공시 기준일: {notice['afterDate']}\n"
+            "새 공시가 없어 오늘은 수량 변동 알림이 없습니다. 정기 점검은 정상 실행됐습니다.\n"
+            f"공식 원본(최신): {source_url(notice['fund'],notice['afterDate'])}")
+
+
+def send_notice(notice,token,cid,call=request):
+    result=call(token,'sendMessage',{'chat_id':int(cid),'text':notice_text(notice),'link_preview_options':{'is_disabled':True},'allow_paid_broadcast':False})
+    if not isinstance(result,dict) or type(result.get('message_id')) is not int or result['message_id']<=0 or not isinstance(result.get('chat'),dict) or result['chat'].get('id')!=int(cid):
+        raise ValueError('Unverified acceptance')
+    return result['message_id']
+
+
+def notice_already_sent(history,today,notice):
+    """Same-day re-run guard based on the previous run report of this day.
+
+    Snapshot acceptance already stops an 'unchanged' notice from repeating on
+    a later day (the same disclosure ingests as 'duplicate' afterwards). On a
+    same-day scheduled re-run the notice kind degrades for the same disclosure
+    date, so dedup keys on fund and disclosure date, not on the kind.
+    """
+    if history is None:return False
+    try:previous=json.loads(history.read('runtime/latest-run.json') or b'null')
+    except Exception:return False
+    if not isinstance(previous,dict) or not str(previous.get('checkedAt','')).startswith(today.isoformat()):return False
+    return any(isinstance(n,dict) and n.get('status')=='sent' and n.get('fund')==notice['fund'] and n.get('afterDate')==notice['afterDate'] for n in previous.get('notices',[]))
+
+
 def run(dry_run=True):
     now=dt.datetime.now(ZoneInfo('Asia/Seoul'));today=now.date()
     if not dry_run and today.weekday()>4:
@@ -112,6 +150,7 @@ def run(dry_run=True):
     run_id=os.getenv('GITHUB_RUN_ID','local')+'-'+os.getenv('GITHUB_RUN_ATTEMPT','1')
     if not re.fullmatch(r'[A-Za-z0-9-]+',run_id):raise ValueError('Invalid run identity')
     report={'runId':run_id,'checkedAt':now.isoformat(),'mode':'dry_run' if dry_run else 'scheduled','results':[]}
+    notices=[]
     for fund in FUNDS:
         prior={date:snap.get('cuProfile') for date,snap in state.get('funds',{}).get(fund,{}).get('snapshots',{}).items()}
         collection,raw,profile,evidence,attempts=latest_collection(fund,today,historical_profiles=prior)
@@ -125,6 +164,10 @@ def run(dry_run=True):
         state,outcome=ingest_collection(state,collection,cid,profile,now=int(time.time()))
         if store:store.save(state)
         report['results'].append({'fund':fund,'outcome':outcome,'attempts':attempts,'cuVerified':profile is not None,'cuDiagnostic':collection.get('cuDiagnostic','not_checked'),'sourceStatus':collection['status']})
+        if outcome['status']=='unchanged':
+            notices.append({'fund':fund,'kind':'unchanged','beforeDate':outcome['beforeDate'],'afterDate':outcome['asOf'],'cu':profile['cu']})
+        elif outcome['status']=='duplicate' and outcome.get('asOf'):
+            notices.append({'fund':fund,'kind':'no_new_disclosure','afterDate':outcome['asOf'],'today':today.isoformat()})
         print(f"{fund}: {outcome['status']} · source {outcome.get('asOf') or 'unverified'}")
         print(json.dumps({'fund':fund,'sourceStatus':collection['status'],'cuDiagnostic':collection.get('cuDiagnostic','not_checked'),'reason':outcome.get('reason'),'attempts':[{k:a[k] for k in ('date','status','httpStatus') if k in a} for a in attempts]},ensure_ascii=False,sort_keys=True))
     report['acceptedMessages']=0
@@ -133,6 +176,22 @@ def run(dry_run=True):
         # a holiday, duplicate disclosure, or source-failure-only run.
         if any(r['outcome']['status']=='changed' for r in report['results']):
             state,report['acceptedMessages']=dispatch_pending(state,store,token,cid,run_id,eligible_funds={r['fund'] for r in report['results'] if r['outcome']['status']=='changed'})
+        # No-change confirmations are sent only after the snapshot was already
+        # persisted above, so a later run cannot re-derive the same notice:
+        # the same disclosure then ingests as 'duplicate' for a past date, and
+        # same-day re-runs are filtered by notice_already_sent.
+        report['notices']=[]
+        for notice in notices:
+            entry={'fund':notice['fund'],'kind':notice['kind'],'afterDate':notice['afterDate']}
+            if notice_already_sent(history,today,notice):
+                report['notices'].append({**entry,'status':'already_sent_today'});continue
+            try:
+                entry['messageId']=send_notice(notice,token,cid);entry['status']='sent'
+            except Exception:
+                entry['status']='send_failed'
+            report['notices'].append(entry)
+            time.sleep(1.2) # Same per-recipient pacing as dispatch_pending.
+        report['noticeMessages']=sum(n['status']=='sent' for n in report['notices'])
         report['pendingBacklog']=sum(event['state'] in ('pending','retry_wait') for event in state['outbox'].values())
         report['outboxNeedsReview']=sum(event['state'] in ('uncertain','blocked') or bool(event.get('holdReason')) for event in state['outbox'].values())
         report['runUrl']='https://github.com/Sin-Yejun/etf-tracker/actions/runs/'+os.getenv('GITHUB_RUN_ID','')
@@ -140,7 +199,7 @@ def run(dry_run=True):
         history.immutable(f'runtime/runs/{run_id}.json',report_bytes)
         history.put('runtime/latest-run.json',report_bytes,history.read('runtime/latest-run.json'))
     print('No messages sent in dry-run' if dry_run else 'Scheduled run recorded; accepted messages: '+str(report['acceptedMessages']))
-    failed=any(r['outcome']['status'] in ('source_error','held') or not r['cuVerified'] for r in report['results']) or report.get('outboxNeedsReview',0)>0 or report.get('pendingBacklog',0)>0
+    failed=any(r['outcome']['status'] in ('source_error','held') or not r['cuVerified'] for r in report['results']) or report.get('outboxNeedsReview',0)>0 or report.get('pendingBacklog',0)>0 or any(n.get('status')=='send_failed' for n in report.get('notices',[]))
     return int(failed)
 
 
