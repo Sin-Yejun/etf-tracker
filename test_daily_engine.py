@@ -40,7 +40,7 @@ def collection(date=AFTER, fund='time', holdings=None):
             'sourceUrl': source_url(fund, date), 'sha256': raw_hash,
             'originalKey': f'runtime/originals/{fund}/{date}/{raw_hash}.xlsx',
             'collectedAt': '2026-10-08T00:00:00Z', 'cu': FUNDS[fund]['cu'],
-            'dateEvidence': ({'type': 'response_filename', 'value': f'time-{date}.xlsx'} if fund == 'time'
+            'dateEvidence': ({'type': 'response_filename', 'value': f'time-{date}.xlsx'} if FUNDS[fund]['issuer'] == 'time'
                              else {'type': 'workbook_date', 'value': date.replace('-', '/')}),
             'response': {'httpStatus': 200, 'responseUrl': source_url(fund, date)},
             'rows': holdings}

@@ -115,7 +115,7 @@ def collect_one(fund, date, archive, directory, probe=False, downloader=download
         if probe and headers['httpStatus'] != 200:
             raise ValueError(f"Issuer returned HTTP {headers['httpStatus']}; this is not 'unchanged'")
         parsed = parse_official(data, fund, date, headers.get('contentDisposition', ''))
-        if not probe and fund == 'time':
+        if not probe and FUNDS[fund]['issuer'] == 'time':
             parsed['dateEvidence'] = {'type': 'archive_record', 'value': date, 'description': 'Archived snapshot records issuer filename evidence; the original HTTP header was not retained. Local fixture filename is reconstructed.'}
         result.update(parsed)
         result['asOf'] = date

@@ -17,10 +17,13 @@
   :focus-visible { outline: 2px solid var(--down); outline-offset: 2px; }
 
   /* Fund switch */
-  .funds { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; padding: 3px; gap: 3px; }
-  .funds button { border: 0; background: none; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-weight: 600; }
-  .funds button small { font-weight: 400; color: var(--muted); margin-left: 6px; }
-  .funds button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+  .funds { position: relative; display: inline-flex; border: 1px solid var(--line); border-radius: 8px; padding: 3px; gap: 3px; }
+  .funds button { position: relative; z-index: 1; border: 0; background: none; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-weight: 600; transition: color .25s; }
+  .funds button small { font-weight: 400; color: var(--muted); margin-left: 6px; transition: color .25s; }
+  .funds button[aria-pressed="true"] { color: var(--bg); }
+  /* Sliding highlight behind the selected fund; positioned from JS. */
+  .funds .pill { position: absolute; top: 3px; bottom: 3px; left: 0; border-radius: 6px; background: var(--ink); }
+  .funds .pill.ready { transition: transform .28s cubic-bezier(.3, .7, .2, 1), width .28s cubic-bezier(.3, .7, .2, 1); }
   .funds button[aria-pressed="true"] small { color: inherit; opacity: .7; }
   h1 { font-size: 22px; font-weight: 600; margin: 18px 0 4px; }
   .cu { color: var(--muted); margin: 0 0 20px; }
@@ -55,6 +58,7 @@
   .stock { word-break: keep-all; overflow-wrap: anywhere; }
   .name { color: var(--muted); font-size: 12px; }
   .mark { font-size: 12px; margin-left: 6px; }
+  .also { font-size: 11px; margin-left: 6px; padding: 0 5px; border: 1px solid var(--line); border-radius: 4px; }
   .up { color: var(--up); } .down { color: var(--down); }
   .themes { margin: 24px 0 8px; }
   .themes { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 10px 0; }
@@ -63,18 +67,33 @@
   [hidden] { display: none !important; }
   .theme { display: grid; grid-template-columns: 9em 1fr 4.5em 5em; align-items: center; gap: 12px; padding: 5px 0; font-variant-numeric: tabular-nums; }
   .theme .track { height: 8px; background: var(--soft); border-radius: 4px; overflow: hidden; }
-  .theme .fill { height: 100%; background: var(--ink); opacity: .75; }
+  .theme .fill { height: 100%; background: var(--ink); opacity: .75; transform-origin: left; animation: grow .4s cubic-bezier(.3, .7, .2, 1); }
+  @keyframes grow { from { transform: scaleX(0); } }
   .theme .w, .theme .d { text-align: right; }
   .theme .d { font-size: 13px; color: var(--muted); }
   .note { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
   .sub { color: var(--muted); font-size: 12px; font-weight: 400; margin-left: 6px; }
   #rows .group th { text-align: left; padding: 20px 0 6px; font-size: 13px; font-weight: 600; color: var(--ink); }
   #rows .empty { color: var(--muted); padding: 32px 0; text-align: center; }
+  #rows tr[data-id] { cursor: pointer; }
+  #rows tr[data-id]:hover td { background: var(--soft); }
+  #rows .hist td { background: var(--soft); text-align: left; white-space: normal; font-size: 13px; padding: 8px 12px; }
+  .hist ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+  .hist li { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+  .hist.enter ol { animation: drop .22s ease-out; }
+  @keyframes drop { from { opacity: 0; transform: translateY(-4px); } }
+  #rows.fade { animation: fade .2s ease-out; }
+  @keyframes fade { from { opacity: 0; } }
+  .days button, .view button { transition: border-color .15s, box-shadow .15s, color .15s; }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+  .hist .when { min-width: 7.5em; color: var(--muted); }
   @media (max-width: 600px) { .weight, .before { display: none; } h1 { font-size: 19px; } .theme { grid-template-columns: 8em 1fr 4em 4.5em; gap: 8px; font-size: 13px; } }
 </style>
 <main>
   <div class="funds" role="group" aria-label="ETF 선택">
+    <span class="pill" aria-hidden="true"></span>
     <button data-fund="time">TIME<small>426030</small></button>
+    <button data-fund="time_sp500">TIME S&amp;P500<small>426020</small></button>
     <button data-fund="koact">KOACT<small>0015B0</small></button>
   </div>
   <h1 id="title"></h1>
@@ -113,8 +132,9 @@
 </main>
 <script>
 const FUNDS = {
-  time: { name: 'TIME 미국나스닥100액티브', cu: '20,000' },
-  koact: { name: 'KOACT 미국나스닥성장기업액티브', cu: '50,000' },
+  time: { name: 'TIME 미국나스닥100액티브', short: 'TIME 나스닥100', cu: '20,000' },
+  time_sp500: { name: 'TIME 미국S&P500액티브', short: 'TIME S&P500', cu: '20,000' },
+  koact: { name: 'KOACT 미국나스닥성장기업액티브', short: 'KOACT', cu: '50,000' },
 };
 // shortcut: free FMP logo CDN by US ticker; swap for local images if it goes away.
 const LOGO = t => `https://financialmodelingprep.com/image-stock/${t}.png`;
@@ -129,12 +149,12 @@ function tone(img) {
   } catch { return; }
   if (n && sum / n / 3 > 225) img.classList.add('light');
 }
-const snaps = { time: {}, koact: {} };
+const snaps = Object.fromEntries(Object.keys(FUNDS).map(f => [f, {}]));
 let META = { themes: [], stocks: {} };
 const UNSORTED = '미분류';
 // New holdings missing from stocks.json fall back to the issuer's English name and 미분류.
 const info = r => { const t = r.code.split(' ')[0].toUpperCase(); return { ticker: t, ko: META.stocks[t]?.ko || r.name, theme: META.stocks[t]?.theme || UNSORTED }; };
-const view = { fund: 'time', unit: 'day', after: null, before: null, mode: 'change', sort: 'weight' };
+const view = { fund: 'time', unit: 'day', after: null, before: null, mode: 'change', sort: 'weight', open: new Set() };
 const $ = id => document.getElementById(id);
 
 // Exact decimal b - a on strings via BigInt, so 303.06 → 290.59 is exactly -12.47.
@@ -156,6 +176,36 @@ const dateList = fund => Object.keys(snaps[fund]).sort();
 const shortDate = d => `${+d.slice(5, 7)}월 ${+d.slice(8)}일`;
 const weekday = d => '일월화수목금토'[new Date(d + 'T00:00:00').getDay()];
 
+const price = r => Number(r.valueKrw) / Number(r.quantity);
+const man = v => Math.round(v / 1e4).toLocaleString('ko-KR') + '만원';
+
+// Every quantity change of one holding across this fund's disclosures, oldest first.
+function history(fund, id) {
+  const out = [];
+  let prev = null;
+  for (const d of dateList(fund)) {
+    const r = snaps[fund][d].find(x => x.id === id && x.kind === 'stock'), q = r?.quantity ?? '0';
+    if (!prev) { if (!isZero(q)) out.push({ date: d, first: true, qb: q }); }
+    else if (!isZero(sub(prev.q, q))) {
+      const diff = sub(prev.q, q), ref = r && !isZero(q) ? r : prev.r;
+      out.push({ date: d, qa: prev.q, qb: q, diff, amount: Math.abs(Number(diff)) * price(ref) });
+    }
+    prev = { q, r: r && !isZero(q) ? r : prev?.r };
+  }
+  return out;
+}
+
+// First disclosure where each holding appears; holdings already in the first record have no known add date.
+const addedCache = {};
+function firstAdded(fund) {
+  if (addedCache[fund]) return addedCache[fund];
+  const m = new Map(), seen = new Set();
+  dateList(fund).forEach((d, k) => {
+    for (const r of snaps[fund][d]) if (r.kind === 'stock' && !isZero(r.quantity) && !seen.has(r.id)) { seen.add(r.id); if (k) m.set(r.id, { date: d, row: r }); }
+  });
+  return addedCache[fund] = m;
+}
+
 function compare(fund, before, after) {
   const a = stocks(snaps[fund][before] || []), b = stocks(snaps[fund][after] || []);
   const ta = total(a), tb = total(b);
@@ -173,6 +223,16 @@ function compare(fund, before, after) {
 }
 
 const iso = dt => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+// Disclosure prices match the US close two US trading days before the disclosure date.
+// shortcut: hand-kept NYSE full-day closures for 2026–2027; extend the list each year.
+const US_HOLIDAYS = new Set(['2026-01-01', '2026-01-19', '2026-02-16', '2026-04-03', '2026-05-25', '2026-06-19', '2026-07-03', '2026-09-07', '2026-11-26', '2026-12-25',
+  '2027-01-01', '2027-01-18', '2027-02-15', '2027-03-26', '2027-05-31', '2027-06-18', '2027-07-05', '2027-09-06', '2027-11-25', '2027-12-24']);
+function usTradeDate(d) {
+  const dt = new Date(d + 'T00:00:00');
+  for (let n = 0; n < 2;) { dt.setDate(dt.getDate() - 1); if (dt.getDay() % 6 && !US_HOLIDAYS.has(iso(dt))) n++; }
+  return iso(dt);
+}
+console.assert(usTradeDate('2026-10-26') === '2026-10-22' && usTradeDate('2026-10-12') === '2026-10-08' && usTradeDate('2026-11-30') === '2026-11-25', 'usTradeDate');
 function monday(d) {
   const dt = new Date(d + 'T00:00:00');
   dt.setDate(dt.getDate() - (dt.getDay() + 6) % 7);
@@ -198,6 +258,7 @@ function periods(fund) {
 
 function selectFund(fund) {
   view.fund = fund;
+  view.open.clear();
   const ps = periods(fund), last = ps[ps.length - 1];
   selectPeriod(last.end, last.start);
   $('days').scrollLeft = $('days').scrollWidth;
@@ -206,12 +267,23 @@ function selectFund(fund) {
 function selectPeriod(end, start) {
   view.after = end;
   view.before = start;
-  render();
+  render(true);
 }
 
-function render() {
+function placePill() {
+  const pill = document.querySelector('.funds .pill'), on = document.querySelector('.funds [aria-pressed="true"]');
+  if (!on) return;
+  pill.style.width = on.offsetWidth + 'px';
+  pill.style.transform = `translateX(${on.offsetLeft}px)`;
+  requestAnimationFrame(() => pill.classList.add('ready'));
+}
+
+function render(animate = false) {
   const { fund, after, before } = view;
   for (const b of document.querySelectorAll('.funds button')) b.setAttribute('aria-pressed', b.dataset.fund === fund);
+  placePill();
+  // Restart the fade only for navigation, not when a history row is toggled.
+  if (animate) { const t = $('rows'); t.classList.remove('fade'); void t.offsetWidth; t.classList.add('fade'); }
   $('title').textContent = FUNDS[fund].name;
   $('cu').textContent = `1 CU(${FUNDS[fund].cu}좌)에 담긴 주식 수량을 공시일끼리 비교합니다.`;
 
@@ -228,6 +300,14 @@ function render() {
   if (before) $('before').value = before;
 
   const { items, held } = compare(fund, before, after);
+  // Other funds' tickers from their latest disclosure on or before this date; ids differ by issuer, tickers don't.
+  const others = Object.keys(FUNDS).filter(f => f !== fund).map(f => {
+    const d = dateList(f).filter(x => x <= after).pop();
+    return [f, new Set(d ? snaps[f][d].filter(r => r.kind === 'stock' && !isZero(r.quantity)).map(r => info(r).ticker) : [])];
+  });
+  const shared = t => others.filter(([, s]) => s.has(t)).map(([f]) => FUNDS[f].short);
+  const heldNow = items.filter(i => !isZero(i.qb)).map(i => shared(i.ticker).length);
+  const overlap = heldNow.some(n => n) ? ` 다른 ETF와 겹치는 종목 ${heldNow.filter(n => n).length}개(${others.length + 1}개 ETF 모두 보유 ${heldNow.filter(n => n === others.length).length}개).` : '';
   const count = s => items.filter(i => i.status === s).length;
   const changed = items.filter(i => i.status).length;
   $('summary').textContent = !before
@@ -235,6 +315,7 @@ function render() {
     : changed
       ? `${shortDate(before)}부터 ${shortDate(after)}까지 ${count('변경')}종목 수량이 바뀌었고, 새로 편입 ${count('신규')}종목, 편출 ${count('편출')}종목입니다.`
       : `${shortDate(before)}부터 ${shortDate(after)}까지 수량이 모두 같습니다.`;
+  $('summary').textContent += overlap;
 
   const themes = new Map([...META.themes, UNSORTED].map(t => [t, { wa: 0, wb: 0 }]));
   for (const i of items) { const t = themes.get(i.theme); t.wa += i.wa; t.wb += i.wb; }
@@ -254,12 +335,33 @@ function render() {
   $('sort').hidden = view.mode !== 'change';
 
   const stockCell = (i, mark = '') => `<td><div class="stock"><img class="logo" src="${LOGO(i.ticker)}" alt="" loading="lazy" crossorigin="anonymous" onload="tone(this)" onerror="this.outerHTML='<span class=logo>${i.ticker.slice(0, 2)}</span>'">
-      <div title="${i.r.name}"><b>${i.ko}</b><span class="sub">${i.ticker}</span>${mark}<div class="name">${i.theme}</div></div></div></td>`;
+      <div title="${i.r.name}"><b>${i.ko}</b><span class="sub">${i.ticker}</span>${mark}<div class="name">${i.theme}${added(i)}${shared(i.ticker).map(s => `<span class="also">${s}</span>`).join('')}</div></div></div></td>`;
   const pct2 = w => (w * 100).toFixed(2) + '%';
+  const row = i => `<tr data-id="${i.r.id}" tabindex="0" aria-expanded="${view.open.has(i.r.id)}">`;
+  const hist = (i, cols) => {
+    if (!view.open.has(i.r.id)) return '';
+    const lines = history(fund, i.r.id).filter(h => h.date <= after).reverse().map(h => {
+      const when = `<span class="when">${shortDate(usTradeDate(h.date))}(추정)</span>`;
+      if (h.first) return `<li>${when}<span>첫 기록 ${fmt(h.qb)}주 보유 (이전 매수일 모름)</span></li>`;
+      const up = !h.diff.startsWith('-');
+      const what = isZero(h.qa) ? '신규 편입' : isZero(h.qb) ? '전량 편출' : up ? '추가 매수' : '일부 매도';
+      return `<li>${when}<span class="${up ? 'up' : 'down'}">${what} ${up ? '+' : ''}${fmt(h.diff)}주</span><span>${fmt(h.qa)} → ${fmt(h.qb)}주</span><span class="name">약 ${man(h.amount)}</span></li>`;
+    });
+    return `<tr class="hist${i.r.id === view.justOpened ? ' enter' : ''}"><td colspan="${cols}"><ol>${lines.join('')}</ol></td></tr>`;
+  };
+  // Principal = the first disclosure's valuation of that position (per 1 CU), not an executed trade price.
+  const latest = stocks(snaps[fund][after] || []);
+  const added = i => {
+    const a = firstAdded(fund).get(i.r.id);
+    if (!a) return '';
+    const now = latest.get(i.r.id), move = now && !isZero(now.quantity) ? price(now) / price(a.row) - 1 : null;
+    const pctText = move === null || a.date === after ? '' : ` · 주가 <span class="${move > 0 ? 'up' : move < 0 ? 'down' : ''}">${move > 0 ? '+' : ''}${(move * 100).toFixed(1)}%</span>`;
+    return ` · <span title="${shortDate(a.date)} 공시에서 처음 확인, 미국 ${shortDate(usTradeDate(a.date))} 종가 기준">${shortDate(usTradeDate(a.date))} 최초 편입(추정)</span> · 원금 ${man(Number(a.row.valueKrw))}(${fmt(a.row.quantity)}주)${pctText}`;
+  };
 
   if (view.mode === 'holdings') {
     $('head').innerHTML = '<th>종목</th><th>비중</th><th>수량</th>';
-    $('rows').innerHTML = items.filter(i => !isZero(i.qb)).map(i => `<tr>${stockCell(i)}<td>${pct2(i.wb)}</td><td>${fmt(i.qb)}</td></tr>`).join('');
+    $('rows').innerHTML = items.filter(i => !isZero(i.qb)).map(i => `${row(i)}${stockCell(i)}<td>${pct2(i.wb)}</td><td>${fmt(i.qb)}</td></tr>${hist(i, 3)}`).join('');
     return;
   }
 
@@ -274,9 +376,9 @@ function render() {
     const mark = i.status === '신규' ? '<span class="mark up">신규 편입</span>' : i.status === '편출' ? '<span class="mark down">편출</span>' : '';
     const cls = i.diff.startsWith('-') ? 'down' : 'up';
     const rate = Number.isFinite(i.rate) ? `<div class="name">${i.rate > 0 ? '+' : ''}${(i.rate * 100).toFixed(1)}%</div>` : '';
-    return `<tr>${stockCell(i, mark)}
+    return `${row(i)}${stockCell(i, mark)}
     <td class="weight">${pct2(i.weight)}</td><td class="before">${fmt(i.qa)}</td><td>${fmt(i.qb)}</td>
-    <td class="${cls}">${i.diff.startsWith('-') ? '' : '+'}${fmt(i.diff)}${rate}</td></tr>`;
+    <td class="${cls}">${i.diff.startsWith('-') ? '' : '+'}${fmt(i.diff)}${rate}</td></tr>${hist(i, 5)}`;
   }).join('')).join('') : `<tr><td colspan="5" class="empty">${before ? '이 기간에는 수량이 바뀐 종목이 없습니다.' : '첫 기록이라 비교할 이전 공시가 없습니다.'}</td></tr>`;
 }
 
@@ -291,10 +393,15 @@ Promise.all([
     for (const [date, s] of Object.entries(f.snapshots || {})) snaps[fund][date] = s.rows;
   document.querySelector('.funds').onclick = e => { const b = e.target.closest('[data-fund]'); if (b) selectFund(b.dataset.fund); };
   $('days').onclick = e => { const b = e.target.closest('[data-end]'); if (b) selectPeriod(b.dataset.end, b.dataset.start || null); };
-  $('before').onchange = e => { view.before = e.target.value; render(); };
-  $('sort').onclick = e => { const b = e.target.closest('[data-sort]'); if (b) { view.sort = b.dataset.sort; render(); } };
-  $('show').onclick =e => { const b = e.target.closest('[data-mode]'); if (b) { view.mode = b.dataset.mode; render(); } };
+  $('before').onchange = e => { view.before = e.target.value; render(true); };
+  $('sort').onclick = e => { const b = e.target.closest('[data-sort]'); if (b) { view.sort = b.dataset.sort; render(true); } };
+  const toggle = tr => { const id = tr.dataset.id; view.justOpened = view.open.has(id) ? null : id; view.open.has(id) ? view.open.delete(id) : view.open.add(id); render(); view.justOpened = null; document.querySelector(`#rows tr[data-id="${id}"]`)?.focus(); };
+  $('rows').onclick = e => { const tr = e.target.closest('tr[data-id]'); if (tr) toggle(tr); };
+  $('rows').onkeydown = e => { const tr = e.target.closest('tr[data-id]'); if (tr && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggle(tr); } };
+  $('show').onclick =e => { const b = e.target.closest('[data-mode]'); if (b) { view.mode = b.dataset.mode; render(true); } };
   document.querySelector('.units').onclick = e => { const b = e.target.closest('[data-unit]'); if (b) { view.unit = b.dataset.unit; selectFund(view.fund); } };
+  window.addEventListener('resize', placePill);
+  document.fonts?.ready.then(placePill);
   selectFund('time');
 });
 </script>

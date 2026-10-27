@@ -30,7 +30,7 @@ def latest_collection(fund,today,fetch=download,cu_fetch=fetch_evidence,historic
             parsed=parse_official(raw,fund,date,headers.get('contentDisposition',''))
             collection={'fund':fund,'requestedDate':date,'asOf':date,'status':'verified_no_baseline','provenanceMode':'live_issuer_probe',
                         'collectedAt':dt.datetime.now(dt.timezone.utc).isoformat(),'sourceUrl':source_url(fund,date),'sha256':digest,
-                        'originalKey':f'runtime/originals/{fund}/{date}/{digest}'+('.xlsx' if fund=='time' else '.xls'),
+                        'originalKey':f'runtime/originals/{fund}/{date}/{digest}'+('.xlsx' if FUNDS[fund]['issuer']=='time' else '.xls'),
                         'response':headers,'errors':[],**parsed}
         except Exception:
             attempts.append({'date':date,'status':'download_or_validation_error'});continue

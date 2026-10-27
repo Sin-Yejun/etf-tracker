@@ -7,7 +7,7 @@ import urllib.request
 from zoneinfo import ZoneInfo
 from etf_collector.core import FUNDS,valid_date
 
-SOURCES={'time':'https://timeetf.co.kr/m11_view.php?idx=2','koact':'https://www.samsungactive.co.kr/api/v1/product/etf/2ETFQ1.do'}
+SOURCES={f:f"https://timeetf.co.kr/m11_view.php?idx={v['idx']}" for f,v in FUNDS.items() if v['issuer']=='time'}|{'koact':'https://www.samsungactive.co.kr/api/v1/product/etf/2ETFQ1.do'}
 LIMIT=2*1024*1024
 class CUError(Exception):pass
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -38,7 +38,7 @@ def parse_cu(fund,body):
         else:
             html=body.decode('utf-8')
             titles=re.findall(r'<title[^>]*>(.*?)</title>',html,re.I|re.S)
-            if len(titles)!=1 or re.sub(r'\s+','',titles[0])!='TIME미국나스닥100액티브(426030)':raise ValueError()
+            if len(titles)!=1 or re.sub(r'\s+','',titles[0])!=re.sub(r'\s+','',f"{FUNDS[fund]['name']}({FUNDS[fund]['code']})"):raise ValueError()
             found=re.findall(r'<dt[^>]*>\s*설정단위\(좌\)\s*</dt>\s*<dd[^>]*>\s*([0-9,]+)\s*</dd>',html)
             if len(found)!=1:raise ValueError()
             raw=found[0].replace(',','')

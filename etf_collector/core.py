@@ -13,8 +13,9 @@ from xml.etree import ElementTree as ET
 import xlrd
 
 FUNDS = {
-    'time': {'name': 'TIME 미국나스닥100액티브', 'code': '426030', 'cu': 20000},
-    'koact': {'name': 'KOACT 미국나스닥성장기업액티브', 'code': '0015B0', 'cu': 50000},
+    'time': {'name': 'TIME 미국나스닥100액티브', 'code': '426030', 'cu': 20000, 'issuer': 'time', 'idx': 2},
+    'time_sp500': {'name': 'TIME 미국S&P500액티브', 'code': '426020', 'cu': 20000, 'issuer': 'time', 'idx': 5},
+    'koact': {'name': 'KOACT 미국나스닥성장기업액티브', 'code': '0015B0', 'cu': 50000, 'issuer': 'koact'},
 }
 CU_PROFILE_AS_OF = '2026-10-08'
 MAX_BYTES = 4 * 1024 * 1024
@@ -34,8 +35,8 @@ def valid_date(value):
 
 def source_url(fund, date):
     valid_date(date)
-    if fund == 'time':
-        return f'https://timeetf.co.kr/pdf_excel.php?idx=2&pdfDate={date}'
+    if FUNDS.get(fund, {}).get('issuer') == 'time':
+        return f"https://timeetf.co.kr/pdf_excel.php?idx={FUNDS[fund]['idx']}&pdfDate={date}"
     if fund == 'koact':
         return f'https://www.samsungactive.co.kr/excel_pdf.do?fId=2ETFQ1&gijunYMD={date.replace("-", "")}'
     raise ValueError('Unknown fund')
@@ -183,7 +184,8 @@ def parse_official(data, fund, date, disposition=''):
     rows = workbook_rows(data)
     def at(row, column):
         return rows[row][column] if row < len(rows) and column < len(rows[row]) else ''
-    if fund == 'koact':
+    time = FUNDS[fund]['issuer'] == 'time'
+    if not time:
         if '미국나스닥성장기업액티브' not in str(at(0, 0)):
             raise ValueError('Wrong KOACT fund')
         if str(at(1, 0)).replace('/', '-') != date:
@@ -201,19 +203,19 @@ def parse_official(data, fund, date, disposition=''):
             raise ValueError('TIME column schema changed')
         evidence = {'type': 'response_filename', 'value': filename, 'description': '공식 다운로드 파일명 (내부 날짜 없음)'}
     holdings, ids = [], set()
-    for row in rows[1 if fund == 'time' else 3:]:
+    for row in rows[1 if time else 3:]:
         row = row + [''] * max(0, 7 - len(row))
         name = str(row[1]).strip()
         if not name:
             continue
-        code = str(row[0 if fund == 'time' else 3]).strip()
+        code = str(row[0 if time else 3]).strip()
         kind = 'stock' if re.search(r'\bEQUITY$', code, re.I) else 'cash' if re.search(r'현금|CASH', name + ' ' + code) else 'other'
-        identifier = str(row[2]).strip() if fund == 'koact' else re.sub(r'\s+', ' ', code.upper()) or 'CASH:' + name
+        identifier = str(row[2]).strip() if not time else re.sub(r'\s+', ' ', code.upper()) or 'CASH:' + name
         if not identifier or identifier in ids:
             raise ValueError('Missing or duplicate source identifier')
         ids.add(identifier)
-        holding = {'id': identifier, 'code': code, 'name': name, 'quantity': decimal(row[2 if fund == 'time' else 4]), 'valueKrw': decimal(row[3 if fund == 'time' else 6]), 'kind': kind}
-        if fund == 'koact':
+        holding = {'id': identifier, 'code': code, 'name': name, 'quantity': decimal(row[2 if time else 4]), 'valueKrw': decimal(row[3 if time else 6]), 'kind': kind}
+        if not time:
             holding['isin'] = str(row[2])
         holdings.append(holding)
     if sum(r['kind'] == 'stock' for r in holdings) < 10:

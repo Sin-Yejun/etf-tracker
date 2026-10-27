@@ -18,8 +18,8 @@ class CollectorTests(unittest.TestCase):
     def rows(self, fund, date):
         return next(s['rows'] for s in self.archive if s['fund'] == fund and s['date'] == date)
 
-    def test_all_twelve_originals_and_hashes(self):
-        self.assertEqual(len(self.archive), 12)
+    def test_all_originals_and_hashes(self):
+        self.assertEqual(len(self.archive), 35)
         for s in self.archive:
             data = (ROOT / 'fixtures/originals' / Path(s['originalKey']).name).read_bytes()
             self.assertEqual(hashlib.sha256(data).hexdigest(), s['sha256'])
@@ -119,8 +119,8 @@ class CollectorTests(unittest.TestCase):
             self.assertEqual(run('2026-10-08', directory), 0)
             report = json.loads((directory / 'report.json').read_text())
             self.assertFalse(report['deliveryEnabled'])
-            self.assertEqual([r['status'] for r in report['results']], ['verified_unchanged', 'verified_changed'])
-            self.assertEqual([r['cu'] for r in report['results']], [20000, 50000])
+            self.assertEqual([r['status'] for r in report['results']], ['verified_unchanged', 'verified_changed', 'verified_changed'])
+            self.assertEqual([r['cu'] for r in report['results']], [20000, 20000, 50000])
             self.assertEqual(report['results'][0]['dateEvidence']['type'], 'archive_record')
             with self.assertRaises(FileExistsError): run('2026-10-08', directory)
 

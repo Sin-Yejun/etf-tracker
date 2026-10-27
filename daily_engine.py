@@ -122,7 +122,7 @@ def _source_snapshot(collection):
     if collection.get('sourceUrl') != expected:
         raise ValueError('Source URL mismatch')
     evidence = collection.get('dateEvidence', {})
-    if fund == 'time':
+    if FUNDS[fund]['issuer'] == 'time':
         value = evidence.get('value', '')
         if (evidence.get('type') != 'response_filename' or not isinstance(value, str)
                 or not re.search(r'(?<!\d)' + re.escape(date) + r'(?!\d)', value)):
