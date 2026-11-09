@@ -195,6 +195,20 @@ function history(fund, id) {
   return out;
 }
 
+// Estimated average cost per share (KRW) up to `until`: each buy is priced at that disclosure's close,
+// sells keep the average (moving-average method). Disclosure prices, not executed trade prices.
+function avgCost(fund, id, until) {
+  let qty = 0, cost = 0;
+  for (const d of dateList(fund)) {
+    if (d > until) break;
+    const r = snaps[fund][d].find(x => x.id === id && x.kind === 'stock'), q = Number(r?.quantity ?? 0);
+    if (q > qty) cost += (q - qty) * price(r);
+    else if (q < qty) cost = q ? cost * q / qty : 0;
+    qty = q;
+  }
+  return qty ? cost / qty : null;
+}
+
 // First disclosure where each holding appears; holdings already in the first record have no known add date.
 const addedCache = {};
 function firstAdded(fund) {
@@ -354,9 +368,11 @@ function render(animate = false) {
   const added = i => {
     const a = firstAdded(fund).get(i.r.id);
     if (!a) return '';
-    const now = latest.get(i.r.id), move = now && !isZero(now.quantity) ? price(now) / price(a.row) - 1 : null;
-    const pctText = move === null || a.date === after ? '' : ` · 주가 <span class="${move > 0 ? 'up' : move < 0 ? 'down' : ''}">${move > 0 ? '+' : ''}${(move * 100).toFixed(1)}%</span>`;
-    return ` · <span title="${shortDate(a.date)} 공시에서 처음 확인, 미국 ${shortDate(usTradeDate(a.date))} 종가 기준">${shortDate(usTradeDate(a.date))} 최초 편입(추정)</span> · 원금 ${man(Number(a.row.valueKrw))}(${fmt(a.row.quantity)}주)${pctText}`;
+    const now = latest.get(i.r.id), avg = a.date <= after ? avgCost(fund, i.r.id, after) : null;
+    const move = now && !isZero(now.quantity) && avg ? price(now) / avg - 1 : null;
+    const avgText = avg ? ` · <span title="매수 공시일 종가(원화) 기준 가중평균, 실제 체결가 아님">평단 약 ${Math.round(avg).toLocaleString('ko-KR')}원</span>` : '';
+    const pctText = move === null || a.date === after ? '' : ` · 평단 대비 <span class="${move > 0 ? 'up' : move < 0 ? 'down' : ''}">${move > 0 ? '+' : ''}${(move * 100).toFixed(1)}%</span>`;
+    return ` · <span title="${shortDate(a.date)} 공시에서 처음 확인, 미국 ${shortDate(usTradeDate(a.date))} 종가 기준">${shortDate(usTradeDate(a.date))} 최초 편입(추정)</span> · 원금 ${man(Number(a.row.valueKrw))}(${fmt(a.row.quantity)}주)${avgText}${pctText}`;
   };
 
   if (view.mode === 'holdings') {
