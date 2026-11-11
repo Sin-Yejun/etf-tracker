@@ -8,11 +8,14 @@ import http.client
 import json
 import re
 import ssl
+import time
 
 REPOSITORY='Sin-Yejun/etf-tracker'
 # Bot commits go to their own branch so main keeps only human history.
 BRANCH='runtime'
 MAX_STATE=32*1024*1024
+# Backoff before re-sending a write that verifiably did not land.
+RETRY_DELAYS=(2,5,10)
 
 class HistoryError(Exception): pass
 
@@ -39,17 +42,31 @@ class GitHubHistory:
             if c:
                 try:c.close()
                 except Exception:pass
-    def read(self,path):return self.request('GET',path,raw=True)
+    sleep=staticmethod(time.sleep)
+    def read(self,path):
+        # GETs are side-effect free, so transient failures are retried.
+        for delay in RETRY_DELAYS:
+            try:return self.request('GET',path,raw=True)
+            except HistoryError:self.sleep(delay)
+        return self.request('GET',path,raw=True)
     @staticmethod
     def blob_sha(data):return hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()
     def put(self,path,data,previous=None):
         if len(data)>MAX_STATE:raise HistoryError('History size limit reached')
         payload={'message':'Persist ETF disclosure and notification state','branch':BRANCH,'content':base64.b64encode(data).decode()}
         if previous is not None:payload['sha']=self.blob_sha(previous)
-        # No mutation retry; ambiguous writes are reconciled by a fresh read.
-        try:self.request('PUT',path,payload)
-        except HistoryError:
-            if self.read(path)!=data:raise
+        # Ambiguous writes are reconciled by a fresh read. A write is re-sent
+        # only when the read proves it did not land (content still equals the
+        # expected previous version), so a retry never overwrites another
+        # writer's data: the compare-and-swap SHA is unchanged and still valid.
+        for attempt in range(len(RETRY_DELAYS)+1):
+            try:
+                self.request('PUT',path,payload);break
+            except HistoryError:
+                current=self.read(path)
+                if current==data:break
+                if current!=previous or attempt==len(RETRY_DELAYS):raise
+                self.sleep(RETRY_DELAYS[attempt])
         if self.read(path)!=data:raise HistoryError('History write readback mismatch')
     def immutable(self,path,data):
         previous=self.read(path)
