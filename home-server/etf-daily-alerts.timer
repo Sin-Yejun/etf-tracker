@@ -1,0 +1,9 @@
+[Unit]
+Description=Weekday 08:00 KST etf-tracker alert trigger
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 08:00:00 Asia/Seoul
+Persistent=false
+
+[Install]
+WantedBy=timers.target

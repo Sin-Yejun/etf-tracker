@@ -37,7 +37,8 @@ GitHub Actions 예약 실행은 지연되거나 건너뛰어질 수 있어 정�
 - 봇은 @daniel45_etf_bot과 저장된 개인 chat ID만 허용. 매 예약 실행 getMe/getChat 검증
 - 토큰과 chat ID는 기존 GitHub Secrets에서 읽으며 로그·코드·원장에 원문 저장하지 않음
 - 수신자 지문과 Telegram message_id만 원장에 기록. 원본은 ETF의 공개 운용사 파일
-- workflow_dispatch는 언제나 발송/저장 없는 수동 검증. 예약 이벤트만 승인된 알림 가능
+- workflow_dispatch는 언제나 발송/저장 없는 수동 검증. 예약 이벤트(schedule)와 홈 서버 타이머가 보내는 repository_dispatch(`daily-alerts`)만 승인된 알림 가능
+- 홈 서버 systemd 타이머가 평일 08:00 KST에 repository_dispatch를 보냄(정시 실행). GitHub schedule은 몇 시간씩 늦어지므로 대비용으로만 유지하며, 같은 날 중복 실행은 알림을 다시 보내지 않음
 - 추가 연결 테스트 발송은 하지 않음. 기존 웹사이트와 이 GitHub 이력은 자동 연동하지 않음
 
 ## 확인해야 할 운영 결과

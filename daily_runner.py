@@ -1,4 +1,4 @@
-"""Daily private ETF disclosures. Scheduled sends only; manual invocation is dry-run."""
+"""Daily private ETF disclosures. Scheduled/dispatched sends only; manual invocation is dry-run."""
 import datetime as dt
 from copy import deepcopy
 import hashlib
@@ -202,8 +202,10 @@ def main():
         event=os.getenv('GITHUB_EVENT_NAME')
         if os.getenv('GITHUB_REPOSITORY')!='Sin-Yejun/etf-tracker' or os.getenv('GITHUB_REF')!='refs/heads/main':
             raise ValueError('Exact repository main-branch workflow required')
-        if event not in ('schedule','workflow_dispatch'):raise ValueError('Unsupported trigger')
-        return run(dry_run=event!='schedule')
+        # repository_dispatch comes from the home-server timer (on-time 08:00 KST);
+        # schedule remains as a delayed fallback. Same-day re-runs are deduplicated.
+        if event not in ('schedule','repository_dispatch','workflow_dispatch'):raise ValueError('Unsupported trigger')
+        return run(dry_run=event=='workflow_dispatch')
     except BaseException:
         print('Daily run stopped safely. Do not infer unchanged holdings or retry an uncertain send. Inspect persisted status; no secret diagnostics are printed.')
         return 1

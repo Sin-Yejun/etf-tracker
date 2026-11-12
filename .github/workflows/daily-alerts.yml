@@ -1,7 +1,9 @@
 name: Daily ETF quantity alerts
 on:
   schedule:
-    - cron: '0 23 * * SUN-THU'
+    - cron: '0 23 * * SUN-THU'  # fallback; GitHub often delays this by hours
+  repository_dispatch:
+    types: [daily-alerts]  # sent by the home-server timer at 08:00 KST
   workflow_dispatch:
 permissions:
   contents: read
@@ -33,7 +35,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: python daily_runner.py
       - name: Approved scheduled collection and changed-quantity notifications
-        if: github.event_name == 'schedule'
+        if: github.event_name == 'schedule' || github.event_name == 'repository_dispatch'
         env:
           GITHUB_TOKEN: ${{ github.token }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
