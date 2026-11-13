@@ -124,10 +124,30 @@ def notice_already_sent(history,today,notice):
     except Exception:return False
     if not isinstance(previous,dict) or not str(previous.get('checkedAt','')).startswith(today.isoformat()):return False
     # 'already_sent_today' carries the guard forward to a third same-day run.
-    return any(isinstance(n,dict) and n.get('status') in ('sent','already_sent_today') and n.get('fund')==notice['fund'] and n.get('afterDate')==notice['afterDate'] for n in previous.get('notices',[]))
+    if any(isinstance(n,dict) and n.get('status') in ('sent','already_sent_today') and n.get('fund')==notice['fund'] and n.get('afterDate')==notice['afterDate'] for n in previous.get('notices',[])):return True
+    # An earlier run today already reported this disclosure as changed or
+    # unchanged; a later 'no new disclosure' notice for it would be wrong.
+    return any(isinstance(r,dict) and r.get('fund')==notice['fund'] and isinstance(r.get('outcome'),dict) and r['outcome'].get('status') in ('changed','unchanged') and r['outcome'].get('asOf')==notice['afterDate'] for r in previous.get('results',[]))
 
 
-def run(dry_run=True):
+def run_failed(report):
+    return any(r['outcome']['status'] in ('source_error','held') or not r['cuVerified'] for r in report['results']) or report.get('outboxNeedsReview',0)>0 or report.get('pendingBacklog',0)>0 or any(n.get('status')=='send_failed' for n in report.get('notices',[]))
+
+
+def completed_today(history,today):
+    """True when a scheduled-mode run already finished cleanly today.
+
+    The delayed GitHub schedule is only a fallback for the 08:00 home-server
+    trigger, so it stands down once that run succeeded.
+    """
+    try:previous=json.loads(history.read('runtime/latest-run.json') or b'null')
+    except Exception:return False
+    if not isinstance(previous,dict) or previous.get('mode')!='scheduled' or not str(previous.get('checkedAt','')).startswith(today.isoformat()):return False
+    try:return not run_failed(previous)
+    except Exception:return False
+
+
+def run(dry_run=True,fallback=False):
     now=dt.datetime.now(ZoneInfo('Asia/Seoul'));today=now.date()
     if not dry_run and today.weekday()>4:
         print('Outside approved Korean weekday; no collection or send');return 0
@@ -136,8 +156,11 @@ def run(dry_run=True):
     history=store=None
     if dry_run:state=new_state()
     else:
+        history=GitHubHistory(os.getenv('GITHUB_TOKEN',''))
+        if fallback and completed_today(history,today):
+            print('Fallback schedule: today\'s run already completed; nothing to do');return 0
         validate_recipient(token,cid)
-        history=GitHubHistory(os.getenv('GITHUB_TOKEN',''));store=StateStore(history)
+        store=StateStore(history)
         loaded=store.load()
         state=new_state() if loaded is None else loaded
         state=recover_inflight(state,now=int(time.time()));store.save(state)
@@ -193,8 +216,7 @@ def run(dry_run=True):
         history.immutable(f'runtime/runs/{run_id}.json',report_bytes)
         history.put('runtime/latest-run.json',report_bytes,history.read('runtime/latest-run.json'))
     print('No messages sent in dry-run' if dry_run else 'Scheduled run recorded; accepted messages: '+str(report['acceptedMessages']))
-    failed=any(r['outcome']['status'] in ('source_error','held') or not r['cuVerified'] for r in report['results']) or report.get('outboxNeedsReview',0)>0 or report.get('pendingBacklog',0)>0 or any(n.get('status')=='send_failed' for n in report.get('notices',[]))
-    return int(failed)
+    return int(run_failed(report))
 
 
 def main():
@@ -203,9 +225,9 @@ def main():
         if os.getenv('GITHUB_REPOSITORY')!='Sin-Yejun/etf-tracker' or os.getenv('GITHUB_REF')!='refs/heads/main':
             raise ValueError('Exact repository main-branch workflow required')
         # repository_dispatch comes from the home-server timer (on-time 08:00 KST);
-        # schedule remains as a delayed fallback. Same-day re-runs are deduplicated.
+        # schedule remains as a delayed fallback that stands down once today's run succeeded.
         if event not in ('schedule','repository_dispatch','workflow_dispatch'):raise ValueError('Unsupported trigger')
-        return run(dry_run=event=='workflow_dispatch')
+        return run(dry_run=event=='workflow_dispatch',fallback=event=='schedule')
     except BaseException:
         print('Daily run stopped safely. Do not infer unchanged holdings or retry an uncertain send. Inspect persisted status; no secret diagnostics are printed.')
         return 1

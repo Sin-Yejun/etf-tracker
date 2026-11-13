@@ -1,7 +1,7 @@
 import copy,datetime as dt,hashlib,json,unittest
 from pathlib import Path
 from unittest.mock import patch
-from daily_runner import latest_collection,dispatch_pending,validate_recipient,notice_text,send_notice,notice_already_sent
+from daily_runner import latest_collection,dispatch_pending,validate_recipient,notice_text,send_notice,notice_already_sent,completed_today
 from daily_engine import new_state,ingest_collection,pending_parts,recover_inflight
 from github_history import HistoryError
 ROOT=Path(__file__).parent
@@ -93,6 +93,27 @@ class RunnerTests(unittest.TestCase):
   self.assertTrue(notice_already_sent(H(rerun),dt.date(2026,10,9),notice))
   failed=json.dumps({'checkedAt':'2026-10-09T09:00:00+09:00','notices':[{'fund':'koact','kind':'no_new_disclosure','afterDate':'2026-10-08','status':'send_failed'}]}).encode()
   self.assertFalse(notice_already_sent(H(failed),dt.date(2026,10,9),notice))
+ def test_notice_suppressed_after_same_day_changed_result(self):
+  class H:
+   def read(self,path):return json.dumps({'checkedAt':'2026-11-13T08:00:47+09:00','notices':[],'results':[{'fund':'koact','outcome':{'status':'changed','asOf':'2026-11-13'}}]}).encode()
+  notice={'fund':'koact','kind':'no_new_disclosure','afterDate':'2026-11-13','today':'2026-11-13'}
+  self.assertTrue(notice_already_sent(H(),dt.date(2026,11,13),notice))
+  self.assertFalse(notice_already_sent(H(),dt.date(2026,11,13),{**notice,'fund':'time'}))
+  self.assertFalse(notice_already_sent(H(),dt.date(2026,11,13),{**notice,'afterDate':'2026-11-12'}))
+ def test_fallback_stands_down_only_after_clean_run_today(self):
+  class H:
+   def __init__(self,doc):self.doc=None if doc is None else json.dumps(doc).encode()
+   def read(self,path):return self.doc
+  ok={'mode':'scheduled','checkedAt':'2026-11-13T08:00:47+09:00','results':[{'fund':'koact','cuVerified':True,'outcome':{'status':'changed','asOf':'2026-11-13'}}],'notices':[],'pendingBacklog':0,'outboxNeedsReview':0}
+  today=dt.date(2026,11,13)
+  self.assertTrue(completed_today(H(ok),today))
+  self.assertFalse(completed_today(H(ok),dt.date(2026,11,14)))
+  self.assertFalse(completed_today(H(None),today))
+  self.assertFalse(completed_today(H({**ok,'mode':'dry_run'}),today))
+  self.assertFalse(completed_today(H({**ok,'pendingBacklog':1}),today))
+  self.assertFalse(completed_today(H({**ok,'results':[{'fund':'koact','cuVerified':True,'outcome':{'status':'source_error'}}]}),today))
+  self.assertFalse(completed_today(H({**ok,'notices':[{'status':'send_failed'}]}),today))
+  self.assertFalse(completed_today(H({'mode':'scheduled','checkedAt':'2026-11-13T08:00:47+09:00'}),today))
  def test_cu_fetch_failure_is_per_fund_hold_not_crash(self):
   raw=(ROOT/'fixtures/originals/koact-2026-10-08.xls').read_bytes()
   def cu_fetch(f):raise TimeoutError()
