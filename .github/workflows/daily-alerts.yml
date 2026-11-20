@@ -30,7 +30,7 @@ jobs:
       - name: Regression tests without secrets or network
         run: |
           python -m unittest discover -s tests -v
-          python -m unittest test_daily_engine test_daily_runner test_github_history test_cu_validation test_delivery_state test_telegram_verify test_telegram_test_send -v
+          python -m unittest test_daily_engine test_daily_runner test_github_history test_cu_validation test_delivery_state test_telegram_verify test_telegram_test_send test_koact_relay -v
       - name: Manual validation without writes or Telegram
         if: github.event_name == 'workflow_dispatch'
         run: python daily_runner.py

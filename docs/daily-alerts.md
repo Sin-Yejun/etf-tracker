@@ -38,6 +38,7 @@ GitHub Actions 예약 실행은 지연되거나 건너뛰어질 수 있어 정�
 - 토큰과 chat ID는 기존 GitHub Secrets에서 읽으며 로그·코드·원장에 원문 저장하지 않음
 - 수신자 지문과 Telegram message_id만 원장에 기록. 원본은 ETF의 공개 운용사 파일
 - workflow_dispatch는 언제나 발송/저장 없는 수동 검증. 예약 이벤트(schedule)와 홈 서버 타이머가 보내는 repository_dispatch(`daily-alerts`)만 승인된 알림 가능
+- KOACT 운용사(samsungactive.co.kr)는 2026-11-19부터 GitHub 러너에 HTTP 403을 반환. 홈 서버 타이머가 dispatch 직전에 `home-server/relay_koact.py`로 같은 공식 URL(7일 공시 + CU API)의 원본 응답을 파싱 없이 runtime 브랜치 `runtime/relay/koact/<KST 날짜>.json`에 저장하고, 워크플로는 당일 relay가 있으면 그 바이트를 직접 수집과 똑같은 파서·날짜·CU 검증에 통과시킴. relay가 없거나 날짜·URL·SHA-256이 맞지 않으면 무시하고 직접 수집. CU 확인 시각은 홈 서버가 받은 시각으로 기록
 - 홈 서버 systemd 타이머가 평일 08:00 KST에 repository_dispatch를 보냄(정시 실행). GitHub schedule은 몇 시간씩 늦어지므로 대비용으로만 유지하며, 같은 날 중복 실행은 알림을 다시 보내지 않음
 - 추가 연결 테스트 발송은 하지 않음. 기존 웹사이트와 이 GitHub 이력은 자동 연동하지 않음
 

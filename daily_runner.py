@@ -1,4 +1,5 @@
 """Daily private ETF disclosures. Scheduled/dispatched sends only; manual invocation is dry-run."""
+import base64
 import datetime as dt
 from copy import deepcopy
 import hashlib
@@ -10,15 +11,56 @@ import time
 from zoneinfo import ZoneInfo
 from etf_collector.collect import download
 from etf_collector.core import FUNDS,parse_official,source_url
-from cu_validation import fetch_evidence,current_profile,parse_cu,CUError
+from cu_validation import SOURCES,fetch_evidence,current_profile,parse_cu,CUError
 from daily_engine import new_state,ingest_collection,pending_parts,begin_send,finish_send,recover_inflight,recipient_key
 from github_history import GitHubHistory,StateStore,HistoryError
 from telegram_test_send import request,EXPECTED_BOT
 
 LOOKBACK_DAYS=7
 MAX_SEND_PARTS=8
+# Issuers that refuse GitHub-hosted runners; the home server fetches their raw
+# responses before dispatch (home-server/relay_koact.py).
+RELAY_FUNDS=('koact',)
 
-def latest_collection(fund,today,fetch=download,cu_fetch=fetch_evidence,historical_profiles=None):
+
+def load_relay(history,fund,today):
+    """Today's home-server relay of exact issuer responses, or None."""
+    try:
+        relay=json.loads(history.read(f'runtime/relay/{fund}/{today.isoformat()}.json') or b'null')
+        fetched=dt.datetime.fromisoformat(relay['fetchedAt'])
+        if (relay.get('version')!=1 or relay.get('fund')!=fund or relay.get('relayDate')!=today.isoformat()
+                or fetched.tzinfo is None or fetched.astimezone(ZoneInfo('Asia/Seoul')).date()!=today
+                or not isinstance(relay.get('disclosures'),list) or not isinstance(relay.get('cuEvidence'),dict)):
+            return None
+        return relay
+    except Exception:
+        return None
+
+
+def _relay_body(entry,url):
+    if not isinstance(entry,dict) or entry.get('url')!=url or entry.get('httpStatus') is None:
+        raise ValueError('Relay entry missing or not for the exact issuer URL')
+    raw=base64.b64decode(entry.get('body',''),validate=True)
+    if hashlib.sha256(raw).hexdigest()!=entry.get('sha256'):raise ValueError('Relay body digest mismatch')
+    return raw
+
+
+def relay_sources(relay,fund):
+    """fetch/cu_fetch stand-ins that replay relayed responses; parsing and validation are unchanged."""
+    entries={e.get('date'):e for e in relay['disclosures'] if isinstance(e,dict)}
+    def fetch(f,date):
+        entry=entries.get(date);raw=_relay_body(entry,source_url(f,date))
+        return raw,{'httpStatus':entry['httpStatus'],'contentType':entry.get('contentType',''),'contentDisposition':entry.get('contentDisposition',''),'responseUrl':entry.get('responseUrl'),'via':'home_server_relay'}
+    def cu_fetch(f):
+        entry=relay['cuEvidence']
+        try:
+            raw=_relay_body(entry,SOURCES[f])
+            if entry['httpStatus']!=200 or entry.get('responseUrl')!=SOURCES[f]:raise ValueError()
+            return raw
+        except Exception:raise CUError('Relayed CU source unavailable') from None
+    return fetch,cu_fetch,relay['cuEvidence'].get('fetchedAt')
+
+def latest_collection(fund,today,fetch=download,cu_fetch=fetch_evidence,historical_profiles=None,cu_observed_at=None):
     attempts=[]
     for age in range(LOOKBACK_DAYS):
         date=(today-dt.timedelta(days=age)).isoformat()
@@ -42,7 +84,7 @@ def latest_collection(fund,today,fetch=download,cu_fetch=fetch_evidence,historic
             cu_stage='cu_identity_schema_or_value_unverified'
             current_cu=parse_cu(fund,evidence)
             cu_stage='historical_cu_evidence_missing' if date!=today.isoformat() else 'cu_date_proof_unverified'
-            try:profile=current_profile(fund,date,evidence)
+            try:profile=current_profile(fund,date,evidence,cu_observed_at)
             except CUError:
                 previous=(historical_profiles or {}).get(date)
                 if not isinstance(previous,dict) or str(previous.get('cu'))!=str(current_cu):raise
@@ -170,7 +212,11 @@ def run(dry_run=True,fallback=False):
     notices=[]
     for fund in FUNDS:
         prior={date:snap.get('cuProfile') for date,snap in state.get('funds',{}).get(fund,{}).get('snapshots',{}).items()}
-        collection,raw,profile,evidence,attempts=latest_collection(fund,today,historical_profiles=prior)
+        fetch,cu_fetch,observed,via=download,fetch_evidence,None,'direct'
+        if history and fund in RELAY_FUNDS:
+            relay=load_relay(history,fund,today)
+            if relay:fetch,cu_fetch,observed=relay_sources(relay,fund);via='home_server_relay'
+        collection,raw,profile,evidence,attempts=latest_collection(fund,today,fetch,cu_fetch,historical_profiles=prior,cu_observed_at=observed)
         if history and raw is not None:
             history.immutable(collection['originalKey'],raw)
             if evidence is not None:
@@ -180,13 +226,13 @@ def run(dry_run=True,fallback=False):
                     profile['evidence']['originalKey']=key
         state,outcome=ingest_collection(state,collection,cid,profile,now=int(time.time()))
         if store:store.save(state)
-        report['results'].append({'fund':fund,'outcome':outcome,'attempts':attempts,'cuVerified':profile is not None,'cuDiagnostic':collection.get('cuDiagnostic','not_checked'),'sourceStatus':collection['status']})
+        report['results'].append({'fund':fund,'outcome':outcome,'attempts':attempts,'cuVerified':profile is not None,'cuDiagnostic':collection.get('cuDiagnostic','not_checked'),'sourceStatus':collection['status'],'sourceVia':via})
         if outcome['status']=='unchanged':
             notices.append({'fund':fund,'kind':'unchanged','beforeDate':outcome['beforeDate'],'afterDate':outcome['asOf']})
         elif outcome['status']=='duplicate' and outcome.get('asOf'):
             notices.append({'fund':fund,'kind':'no_new_disclosure','afterDate':outcome['asOf'],'today':today.isoformat()})
         print(f"{fund}: {outcome['status']} · source {outcome.get('asOf') or 'unverified'}")
-        print(json.dumps({'fund':fund,'sourceStatus':collection['status'],'cuDiagnostic':collection.get('cuDiagnostic','not_checked'),'reason':outcome.get('reason'),'attempts':[{k:a[k] for k in ('date','status','httpStatus') if k in a} for a in attempts]},ensure_ascii=False,sort_keys=True))
+        print(json.dumps({'fund':fund,'sourceVia':via,'sourceStatus':collection['status'],'cuDiagnostic':collection.get('cuDiagnostic','not_checked'),'reason':outcome.get('reason'),'attempts':[{k:a[k] for k in ('date','status','httpStatus') if k in a} for a in attempts]},ensure_ascii=False,sort_keys=True))
     report['acceptedMessages']=0
     if not dry_run:
         # No fresh changed disclosure this run: do not send old queued data on

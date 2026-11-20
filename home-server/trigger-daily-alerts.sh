@@ -5,6 +5,10 @@
 set -euo pipefail
 TOKEN_FILE="${TOKEN_FILE:-$HOME/.config/etf-tracker/github-token}"
 TOKEN="$(tr -d '[:space:]' < "$TOKEN_FILE")"
+# KOACT's issuer refuses GitHub runners (HTTP 403), so relay its raw responses
+# to the runtime branch first. A relay failure must not block the dispatch:
+# the workflow then tries the issuer directly, as before.
+TOKEN_FILE="$TOKEN_FILE" python3 "$(dirname "$0")/relay_koact.py" || echo "koact relay failed; dispatching anyway" >&2
 for attempt in 1 2 3 4 5; do
   code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
     -H "Authorization: Bearer $TOKEN" \
