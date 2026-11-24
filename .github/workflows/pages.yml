@@ -23,7 +23,7 @@ jobs:
       id-token: write
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.first_deploy.outputs.page_url || steps.retry_deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -44,5 +44,13 @@ jobs:
           cp fixtures/seed.json _site/fixtures/
           cp _runtime/runtime/state.json _site/runtime/
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
-      - id: deployment
+      # deploy-pages sometimes queries the artifact list before the just-uploaded
+      # artifact is visible ("Found 0 artifact(s)"), so wait and retry once.
+      - id: first_deploy
+        continue-on-error: true
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+      - if: steps.first_deploy.outcome == 'failure'
+        run: sleep 30
+      - id: retry_deploy
+        if: steps.first_deploy.outcome == 'failure'
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
